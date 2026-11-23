@@ -11,7 +11,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## 0. Repo & secrets
 - [x] Remote is `https://github.com/1stBaseFoundation/HumidityDome.git`
-- [ ] `git init` + first commit (README, TODO, .gitignore, code, tests)
+- [x] `git init` + first commit + push to `origin/main`
 - [x] `.gitignore` covers `.env`, `*.db*`, `__pycache__/`, `.venv/`
 - [ ] GitHub Actions secrets: `SPRITE_URL`, `SPRITES_TOKEN`
 - [ ] Sprites connectors created + granted to the `humiditydome` Sprite:
@@ -104,8 +104,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] Groq: key + custom connector, gateway URL in config
 - [x] Resend: key + connector, gateway URL in config
 - [x] Resend: verify `1stbase.org` DNS (SPF/DKIM/MX/DMARC)
-- [ ] GitHub Actions `tick.yml` — cron `*/30 * * * *`
-- [ ] Add `SPRITE_URL`, `SPRITES_TOKEN` secrets
+- [x] GitHub Actions `tick.yml` — cron `*/30 * * * *`
+- [x] Add `SPRITE_URL`, `SPRITES_TOKEN` secrets
 - [ ] Manual `workflow_dispatch` test
 
 ## 12. Tests & QA
