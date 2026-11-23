@@ -1,0 +1,21 @@
+name: tick
+
+on:
+  schedule:
+    # Every 30 minutes, UTC. GitHub may delay scheduled runs by a few minutes.
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger HumidityDome tick
+        run: |
+          curl -sS -X POST "$SPRITE_URL/tick" \
+            -H "Authorization: Bearer $SPRITES_TOKEN" \
+            -H "Content-Type: application/json" \
+            --fail-with-body
+        env:
+          SPRITE_URL: ${{ secrets.SPRITE_URL }}
+          SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}

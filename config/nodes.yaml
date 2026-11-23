@@ -1,0 +1,59 @@
+# HumidityDome configuration
+poll:
+  interval_minutes: 30
+  timeout_seconds: 10
+  user_agent: "HumidityDome/1.0"
+
+report:
+  time_local: "07:00"        # local time (see utc_offset_hours)
+  utc_offset_hours: 2        # fixed UTC+2
+  to_email: "info@1stbase.org"
+  from_email: "noreply@1stbase.org"
+  reply_to: "info@1stbase.org"
+
+alerts:
+  consecutive_failures: 2
+  peer_drop_fraction: 0.40
+  peer_min: null             # null -> use each node's reported minPeers
+  cooldown_minutes: 60
+  send_recovery: true
+  clock_skew_seconds: 30
+  stale_peer_seconds: 86400
+
+llm:
+  model: "qwen/qwen3.8-27b"
+  # Groq connector gateway base URL (Sprites dashboard):
+  gateway_base_url: "https://api.sprites.dev/v1/gateway/custom_api/8ziLy0RImS4Lv6sH6Q1B6A"
+  temperature: 0.2
+  max_tokens: 800
+
+email:
+  # Resend connector gateway base URL (Sprites dashboard):
+  gateway_base_url: "https://api.sprites.dev/v1/gateway/resend/xL28cBKfRTf-RIHpfDZjdw"
+
+paths:
+  status: "/api/node/state/status"
+  database: "/home/sprite/humiditydome/humiditydome.db"
+  dry_run: false
+
+nodes:
+  - name: seed-150
+    ip: "150.136.172.164"
+    port: 3001
+  - name: seed-129
+    ip: "129.153.171.162"
+    port: 3001
+  - name: seed-145
+    ip: "145.241.103.198"
+    port: 3001
+  - name: seed-8
+    ip: "8.222.204.112"
+    port: 3001
+  - name: seed-84
+    ip: "84.12.114.48"
+    port: 3001
+  - name: node-1stbase
+    ip: node.1stbase.org
+    port: 443
+    scheme: https
+    path: /api/node/state/status
