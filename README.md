@@ -6,7 +6,7 @@ HumidityDome is a small, self-hosted monitoring agent that watches the health of
 blockchain seed nodes. It polls each node, validates its sync / peer / version state, and
 emails a clean daily summary plus instant alerts when something breaks.
 
-> **Status: WIP** — v1 targets the 5 seed nodes. Websites / preview nodes are out of
+> **Status: WIP** — v1 targets the 5 seed nodes and preview node. Websites are out of
 > scope for now.
 
 ---
