@@ -126,6 +126,10 @@ At **07:00 UTC+2** the agent compiles the last 24 h into a compact rollup, asks
 
 *The daily report: raw node telemetry compiled into a clean, readable email.*
 
+![HumidityDome critical alert email](docs/screenshot-critical-alert.png)
+
+*Instant alert when a node goes unreachable — one email per incident, no duplicates.*
+
 ## Tech stack
 
 - **Fly.io Sprites** — persistent, hardware-isolated VM; sleeps when idle, wakes on request

@@ -84,7 +84,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] `sprite-env services create web ... --http-port 8080`
 - [x] Verify `/healthz`
 - [x] Live `/tick` — all 6 nodes reachable
-- [ ] Verify cold-wake: hit the URL, confirm the SQLite DB persisted
+- [x] Verify cold-wake: hit the URL, confirm the SQLite DB persisted
 - [x] Remove `HUMIDITYDOME_DRYRUN=1` (production mode)
 
 ## Deployed
@@ -112,10 +112,10 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] Sprite dry-run `/tick`
 - [x] Groq connector live test
 - [x] Resend connector live test
-- [ ] Force a real fault → real alert email
+- [x] Force a real fault → real alert email (seed-150 offline; alert received)
 - [x] Force daily report → real email
 - [x] Add `node-1stbase` (HTTPS) + markdown→HTML formatting
-- [ ] Verify SQLite survives a cold wake
+- [x] Verify SQLite survives a cold wake
 
 ## 13. Demo
 - [x] Email summary screenshot (`docs/screenshot-email-summary.png`)
