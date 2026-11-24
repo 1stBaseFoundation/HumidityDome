@@ -3,6 +3,7 @@ name: tick
 on:
   schedule:
     # Every 30 minutes, UTC. GitHub may delay scheduled runs by a few minutes.
+    # Editing this file forces GitHub to re-register the schedule if it stops firing.
     - cron: "*/30 * * * *"
   workflow_dispatch:
 
