@@ -24,7 +24,7 @@ node goes dark, loses peers, or stops syncing.
 ## How it works
 
 ```
-            every 30 min (any HTTP scheduler)
+            every 30 min (cron-job.org or any HTTP scheduler)
                           |
                           v
               +---------------------+
@@ -51,8 +51,9 @@ node goes dark, loses peers, or stops syncing.
   tokens.
 - The LLM only writes prose; **all numbers are computed in code** — that is what keeps the
   summary "error-free".
-- Samples, incidents, and reports older than **7 days** are pruned automatically
-  (`paths.retention_days`).
+- **7-day retention:** samples, incidents, and reports older than 7 days are deleted on
+  every tick (`paths.retention_days`). At 30-min polling and 6 nodes that's ~2,000 sample
+  rows — the SQLite file stays tiny and the LLM context stays well under free-tier limits.
 
 ## Why Fly.io Sprites
 
@@ -112,9 +113,9 @@ A node triggers an email alert when it:
 - has **clock skew** beyond the threshold
 - shows a **seed-to-seed peering gap**
 
-Alerts are debounced (default 2 consecutive failures). Once a node alerts, repeat
-notifications for that node are suppressed for 24 hours — a flapping node won't email you
-twice in one day. Recovery notices are still sent when it comes back.
+Alerts are debounced by **2 consecutive failures**, then deduplicated **per node**: at most
+**one alert email per node per 24 hours**, even if the node keeps flapping. Recovery
+notices are still sent when it comes back.
 
 ## Daily report
 
@@ -122,8 +123,17 @@ At **09:00 UTC+2** the agent compiles the last 24 h into a compact rollup, asks
 `qwen/qwen3.8-27b` (Groq) to write a professional summary, and emails it to
 `info@1stbase.org` via a Resend **Sprites connector**.
 
-It sends even if a manual test report went out earlier the same day — only a report sent
-**after 09:00** counts as today's.
+It sends even if a **manual** `POST /report` went out earlier the same day. Reports are
+tagged by kind: `manual` vs `scheduled`. Only a **scheduled** report counts as "sent
+today", so the 09:00 summary always goes out and you never get two scheduled reports in one
+day.
+
+## Data retention
+
+HumidityDome keeps a rolling **7-day** window. On every tick, `prune_old_data()` deletes
+`samples`, `incidents`, and `daily_reports` older than `paths.retention_days` (default 7).
+At 30-minute polling and 6 nodes that is ~2,000 sample rows — the SQLite file stays small
+and the daily LLM context stays well under free-tier token limits.
 
 ## Screenshot
 
@@ -139,7 +149,7 @@ It sends even if a manual test report went out earlier the same day — only a r
 
 - **Fly.io Sprites** — persistent, hardware-isolated VM; sleeps when idle, wakes on request
 - Python 3.12, FastAPI, httpx, SQLite (WAL) on the Sprite's persistent disk
-- GitHub Actions (cron trigger) — any HTTP scheduler works
+- **cron-job.org** / GitHub Actions (HTTP trigger) — any scheduler works
 - Groq (LLM) + Resend (email) via **Sprites connectors**
 
 ## Repo layout
@@ -205,14 +215,32 @@ Because the Sprite has a persistent ext4 disk, the SQLite database at
 `/home/sprite/humiditydome/humiditydome.db` survives every sleep — there is no external
 database to provision.
 
-### 5. GitHub Actions
+### 5. Scheduling (the trigger)
+
+The Sprite sleeps when idle, so it needs an external HTTP request to wake it. Any scheduler
+that can `POST <sprite-url>/tick` with `Authorization: Bearer <SPRITES_TOKEN>` works.
+
+#### Option A — cron-job.org (recommended, free)
+
+1. Create a cronjob at **https://cron-job.org**.
+2. **URL:** `https://<sprite-name>-<org-id>.sprites.app/tick`
+3. **Schedule:** every 30 minutes (or hourly for fewer runs).
+4. **Method:** `POST`
+5. **Header:** `Authorization: Bearer <SPRITES_TOKEN>`
+6. **Body:** `{}`
+7. Save → **Run now** to test.
+
+This is the most reliable option. GitHub's scheduler can be slow to register for new
+repositories; cron-job.org is purpose-built for this.
+
+#### Option B — GitHub Actions
 
 Add two repository secrets (**Settings → Secrets and variables → Actions**):
 
 - `SPRITE_URL` — the Sprite's URL from `sprite info`, e.g. `https://<sprite-name>-<org-id>.sprites.app`
 - `SPRITES_TOKEN` — a **Sprites token**, *not* a Fly.io organization token
 
-#### Which token goes in `SPRITES_TOKEN`?
+##### Which token goes in `SPRITES_TOKEN`?
 
 This is the easiest step to get wrong. Fly.io has two different token screens:
 
@@ -225,7 +253,7 @@ Create the token under **Sprites → Tokens**, with the correct organization sel
 (the org that owns the Sprite — `1stbase` in this deployment). Sign in as the
 account that owns that org, then copy the **entire** token string.
 
-#### Troubleshooting `401 unauthorized`
+##### Troubleshooting `401 unauthorized`
 
 If the workflow fails with:
 
@@ -260,7 +288,7 @@ At the current 6-node / 48-poll-per-day scale, this fits comfortably within free
 | **Sprites** | a few seconds of compute per tick; asleep the rest of the time | idle-free |
 | **Groq** | 1–2 calls/day, ~400-token prompts | free developer plan |
 | **Resend** | ~30–60 emails/month | 3,000/month |
-| **GitHub Actions** | 48 runs/day on a public repo | free |
+| **cron-job.org / GitHub Actions** | 48 runs/day | free |
 
 The design is usage-based: the Sprite is only active for the few seconds it takes to probe
 the nodes and persist a tick. **At current scale the target is $0/month.**
@@ -273,8 +301,9 @@ volume.
 
 - No secrets in the repo. Groq / Resend tokens live in **Sprites connectors** — the Sprite
   never sees them; it calls the gateway and the connector attaches the credential.
-- `SPRITES_TOKEN` lives in **GitHub Actions secrets** and must be a **Sprites → Tokens**
-  token (`org-slug/…`), not a Fly.io organization token (`FlyV1…`).
+- `SPRITES_TOKEN` lives in **GitHub Actions secrets** (or the cron-job.org request header)
+  and must be a **Sprites → Tokens** token (`org-slug/…`), not a Fly.io organization token
+  (`FlyV1…`).
 - The Sprite URL is private by default (org-only, token-authenticated).
 - Connector access is deny-by-default: only the `humiditydome` Sprite can use the Groq and
   Resend connectors.
