@@ -216,4 +216,4 @@ Set `HUMIDITYDOME_DRYRUN=1` to skip real emails while developing.
 
 ## License
 
-TBD
+MIT — see [LICENSE](LICENSE).
