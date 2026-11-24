@@ -6,6 +6,10 @@ HumidityDome is a small, self-hosted monitoring agent that watches the health of
 blockchain seed nodes. It polls each node, validates its sync / peer / version state, and
 emails a clean daily summary plus instant alerts when something breaks.
 
+It runs on a **Fly.io Sprite** — a persistent, hardware-isolated VM that sleeps when idle
+and wakes on request. That gives the agent real local state (SQLite) without paying for an
+always-on server.
+
 > **Status: WIP** — v1 targets the 5 seed nodes and preview node. Websites are out of
 > scope for now.
 
@@ -20,28 +24,57 @@ node goes dark, loses peers, or stops syncing.
 ## How it works
 
 ```
-            every 30 min (GitHub Actions cron, free)
+            every 30 min (any HTTP scheduler)
                           |
                           v
               +---------------------+
-              |  Fly.io Sprite      |   sleeps when idle -> $0
+              |  Fly.io Sprite      |   persistent VM, wakes on request
               |  (FastAPI service)  |
               +----------+----------+
                          |
         +----------------+----------------+
         |                |                |
         v                v                v
-   seed nodes        Groq (LLM)      Resend (email)
-   (5x HTTP)         (summary)       (alerts + daily)
-        |
+    seed nodes        Groq (LLM)      Resend (email)
+    (6x HTTP)         (summary)       (alerts + daily)
+        |            via Sprites      via Sprites
+        |            connectors       connectors
         v
-   SQLite (persistent disk)
+    SQLite (persistent ext4 disk)
 ```
 
-- The Sprite **sleeps when idle** (no compute cost) and **wakes on each tick**.
-- State lives in **SQLite on the Sprite's persistent disk**, so it survives every sleep.
+- The Sprite **sleeps when idle** and **wakes on each tick** — you only pay for the seconds
+  it actually works.
+- State lives in **SQLite on the Sprite's persistent ext4 disk**, so it survives warm and
+  cold pauses with no external database to run.
+- **Sprites connectors** hold the Groq and Resend credentials; the Sprite never sees the
+  tokens.
 - The LLM only writes prose; **all numbers are computed in code** — that is what keeps the
   summary "error-free".
+
+## Why Fly.io Sprites
+
+Sprites are the reason this is one small service instead of a server, a volume, and a
+database:
+
+- **Persistent compute without a server.** A Sprite is a hardware-isolated VM with a real
+  ext4 filesystem. SQLite, installed packages, and files survive warm and cold pauses — no
+  external database or volume plumbing.
+- **Idle-aware by default.** The Sprite sleeps when nothing is happening and wakes on the
+  next request (100–500 ms warm, 1–2 s cold). A 30-minute poll means the VM is asleep for
+  the vast majority of the day.
+- **Wake-on-request.** Every Sprite gets an HTTPS URL. An inbound request wakes it, so an
+  external cron can drive the agent without an always-on process.
+- **Services that survive sleep.** `sprite-env services` starts the FastAPI service at boot
+  and restarts it after a cold wake, so the URL always answers.
+- **Connectors for secrets.** Groq and Resend credentials live in the org, not in the
+  Sprite. The Sprite calls them through the Sprites gateway with deny-by-default access
+  policies.
+- **Checkpoints.** Snapshot the entire filesystem before a risky change and restore if
+  needed.
+
+That combination — real disk, hardware isolation, idle-aware billing, and managed
+credentials — is what makes a "monitor my infrastructure" agent practical to run for free.
 
 ## Monitored signals (v1)
 
@@ -64,6 +97,7 @@ node goes dark, loses peers, or stops syncing.
 | seed-145 | `http://145.241.103.198:3001/api/node/state/status`     |
 | seed-8   | `http://8.222.204.112:3001/api/node/state/status`       |
 | seed-84  | `http://84.12.114.48:3001/api/node/state/status`        |
+| node-1stbase | `https://node.1stbase.org/api/node/state/status`    |
 
 ## Alerts
 
@@ -82,14 +116,14 @@ to avoid spam.
 ## Daily report
 
 At **07:00 UTC+2** the agent compiles the last 24 h into a compact rollup, asks
-`qwen/qwen3.8-27b` (Groq free tier) to write a professional summary, and emails it to
-`info@1stbase.org` via Resend.
+`qwen/qwen3.8-27b` (Groq) to write a professional summary, and emails it to
+`info@1stbase.org` via a Resend **Sprites connector**.
 
 ## Tech stack
 
-- Python 3.12, FastAPI, httpx, SQLite (WAL)
-- Fly.io **Sprites** (sleep-when-idle VM)
-- GitHub Actions (cron trigger)
+- **Fly.io Sprites** — persistent, hardware-isolated VM; sleeps when idle, wakes on request
+- Python 3.12, FastAPI, httpx, SQLite (WAL) on the Sprite's persistent disk
+- GitHub Actions (cron trigger) — any HTTP scheduler works
 - Groq (LLM) + Resend (email) via **Sprites connectors**
 
 ## Repo layout
@@ -118,7 +152,7 @@ At **07:00 UTC+2** the agent compiles the last 24 h into a compact rollup, asks
 
 ### 1. Prerequisites
 - A Fly.io account and the `sprite` CLI (`curl -fsSL https://sprites.dev/install.sh | sh`)
-- A Groq API key (free tier)
+- A Groq API key
 - A Resend account + DNS access for `1stbase.org`
 - The GitHub repo `1stBaseFoundation/HumidityDome`
 
@@ -150,6 +184,10 @@ sprite-env services create web \
   --dir /home/sprite/humiditydome/src \
   --http-port 8080
 ```
+
+Because the Sprite has a persistent ext4 disk, the SQLite database at
+`/home/sprite/humiditydome/humiditydome.db` survives every sleep — there is no external
+database to provision.
 
 ### 5. GitHub Actions
 
@@ -197,22 +235,33 @@ curl -X POST localhost:8000/tick
 
 Set `HUMIDITYDOME_DRYRUN=1` to skip real emails while developing.
 
-## Cost
+## Cost & scaling
 
-- **Sprites**: $0 while idle; a few seconds of compute per tick.
-- **Groq**: free tier (1–2 calls/day, ~400-token prompts).
-- **Resend**: free tier (3,000 emails/month).
-- **GitHub Actions**: free for public repos.
+At the current 6-node / 48-poll-per-day scale, this fits comfortably within free tiers:
 
-**Target: $0/month.**
+| Component | Usage | Free tier |
+|---|---|---|
+| **Sprites** | a few seconds of compute per tick; asleep the rest of the time | idle-free |
+| **Groq** | 1–2 calls/day, ~400-token prompts | free developer plan |
+| **Resend** | ~30–60 emails/month | 3,000/month |
+| **GitHub Actions** | 48 runs/day on a public repo | free |
+
+The design is usage-based: the Sprite is only active for the few seconds it takes to probe
+the nodes and persist a tick. **At current scale the target is $0/month.**
+
+**Scaling:** at 100 nodes the tick is still a few seconds of compute, and a paid Sprites
+plan covers it for a few dollars a month. The architecture doesn't change — only the
+volume.
 
 ## Security
 
-- No secrets in the repo. Groq / Resend tokens live in **Sprites connectors**;
-  `SPRITES_TOKEN` lives in **GitHub Actions secrets**.
-- `SPRITES_TOKEN` must be a **Sprites → Tokens** token (`org-slug/…`), not a
-  Fly.io organization token (`FlyV1…`).
+- No secrets in the repo. Groq / Resend tokens live in **Sprites connectors** — the Sprite
+  never sees them; it calls the gateway and the connector attaches the credential.
+- `SPRITES_TOKEN` lives in **GitHub Actions secrets** and must be a **Sprites → Tokens**
+  token (`org-slug/…`), not a Fly.io organization token (`FlyV1…`).
 - The Sprite URL is private by default (org-only, token-authenticated).
+- Connector access is deny-by-default: only the `humiditydome` Sprite can use the Groq and
+  Resend connectors.
 
 ## License
 
