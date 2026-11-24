@@ -42,6 +42,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] Tables: `samples`, `node_state`, `incidents`, `daily_reports`, `meta`
 - [x] Sample / state / incident / report / meta functions
 - [x] `build_rollup` (compact, LLM-ready)
+- [x] 7-day retention: `prune_old_data()` deletes old samples, incidents, and reports
 - [x] DB path: `/home/sprite/humiditydome/humiditydome.db`
 
 ## 5. Alerts
@@ -71,6 +72,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] Rollup → Groq → HTML → Resend
 - [x] Deterministic table + LLM prose
 - [x] `mark_report_sent` / `is_report_time` (UTC+2)
+- [x] 07:00 report fires even if an earlier manual report was sent that day
 
 ## 9. API
 - [x] `app.py` FastAPI
@@ -106,7 +108,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## 12. Tests & QA
 - [x] `ruff check src tests` — clean
-- [x] `pytest` — 62 passed
+- [x] `pytest` — 64 passed
 - [x] Coverage — 97% line / branch; every business file ≥ 90%
 - [x] Local dry-run against live seeds
 - [x] Sprite dry-run `/tick`

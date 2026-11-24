@@ -51,6 +51,8 @@ node goes dark, loses peers, or stops syncing.
   tokens.
 - The LLM only writes prose; **all numbers are computed in code** — that is what keeps the
   summary "error-free".
+- Samples, incidents, and reports older than **7 days** are pruned automatically
+  (`paths.retention_days`).
 
 ## Why Fly.io Sprites
 
@@ -119,6 +121,9 @@ twice in one day. Recovery notices are still sent when it comes back.
 At **07:00 UTC+2** the agent compiles the last 24 h into a compact rollup, asks
 `qwen/qwen3.8-27b` (Groq) to write a professional summary, and emails it to
 `info@1stbase.org` via a Resend **Sprites connector**.
+
+It sends even if a manual test report went out earlier the same day — only a report sent
+**after 07:00** counts as today's.
 
 ## Screenshot
 

@@ -33,5 +33,6 @@ def test_report_and_alert_defaults(monkeypatch) -> None:
     assert cfg.report.reply_to == "info@1stbase.org"
     assert cfg.alerts.consecutive_failures == 2
     assert cfg.alerts.send_recovery is True
+    assert cfg.retention_days == 7
     assert cfg.llm.model == "qwen/qwen3.8-27b"
     assert cfg.dry_run is False

@@ -74,6 +74,7 @@ class Config:
     nodes: list[NodeConfig]
     status_path: str = "/api/node/state/status"
     database: str = "humiditydome.db"
+    retention_days: int = 7
     dry_run: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -90,6 +91,7 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
     database = os.environ.get("HUMIDITYDOME_DB") or raw.get("paths", {}).get(
         "database", "humiditydome.db"
     )
+    retention_days = int(raw.get("paths", {}).get("retention_days", 7))
     dry_run = os.environ.get("HUMIDITYDOME_DRYRUN", "").lower() in {"1", "true", "yes"}
     dry_run = dry_run or bool(raw.get("paths", {}).get("dry_run", False))
 
@@ -124,6 +126,7 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
         nodes=nodes,
         status_path=status_path,
         database=database,
+        retention_days=retention_days,
         dry_run=dry_run,
         raw=raw,
     )

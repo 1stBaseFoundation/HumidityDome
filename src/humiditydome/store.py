@@ -331,6 +331,33 @@ def was_report_sent(conn: sqlite3.Connection, date: str) -> bool:
     return row is not None
 
 
+def report_sent_since(conn: sqlite3.Connection, date: str, since_ts: float) -> bool:
+    """True if a report for this date was sent at or after ``since_ts``.
+
+    This lets the 07:00 report fire even if a manual report went out earlier
+    the same day (e.g. a test run at 01:15).
+    """
+    row = conn.execute(
+        "SELECT 1 FROM daily_reports WHERE date = ? AND sent_ts >= ?",
+        (date, since_ts),
+    ).fetchone()
+    return row is not None
+
+
+def prune_old_data(conn: sqlite3.Connection, retention_days: int = 7) -> dict[str, int]:
+    """Delete samples, incidents, and reports older than the retention window."""
+    cutoff = time.time() - retention_days * 86400
+    samples = conn.execute("DELETE FROM samples WHERE ts < ?", (cutoff,)).rowcount
+    incidents = conn.execute(
+        "DELETE FROM incidents WHERE opened_ts < ?", (cutoff,)
+    ).rowcount
+    reports = conn.execute(
+        "DELETE FROM daily_reports WHERE sent_ts < ?", (cutoff,)
+    ).rowcount
+    conn.commit()
+    return {"samples": samples, "incidents": incidents, "reports": reports}
+
+
 def get_meta(conn: sqlite3.Connection, key: str, default: str | None = None) -> str | None:
     row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
     return row["value"] if row else default

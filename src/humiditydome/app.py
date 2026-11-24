@@ -79,6 +79,7 @@ async def run_tick(now: float | None = None) -> dict[str, Any]:
             "last_tick": float(last_tick),
         }
     store.set_meta(conn, "last_tick_ts", str(now))
+    store.prune_old_data(conn, cfg.retention_days)
 
     samples = await _probe_all(now)
 
@@ -97,11 +98,12 @@ async def run_tick(now: float | None = None) -> dict[str, Any]:
     await _dispatch_alerts(out_alerts)
 
     report_sent = False
-    if report.is_report_time(cfg, now) and not store.was_report_sent(
-        conn, report.local_date(cfg, now)
-    ):
-        await report.build_and_send_report(conn, cfg, now)
-        report_sent = True
+    if report.is_report_time(cfg, now):
+        report_date = report.local_date(cfg, now)
+        since = report.local_report_ts(cfg, now)
+        if not store.report_sent_since(conn, report_date, since):
+            await report.build_and_send_report(conn, cfg, now)
+            report_sent = True
 
     return {
         "ok": True,

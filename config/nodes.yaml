@@ -35,6 +35,7 @@ paths:
   status: "/api/node/state/status"
   database: "/home/sprite/humiditydome/humiditydome.db"
   dry_run: false
+  retention_days: 7
 
 nodes:
   - name: seed-150

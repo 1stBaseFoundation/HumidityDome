@@ -32,6 +32,7 @@ def test_local_date_and_report_time() -> None:
     before_7 = datetime(2026, 11, 23, 4, 59, tzinfo=UTC).timestamp()
 
     assert report.local_date(cfg, at_7) == "2026-11-23"
+    assert report.local_report_ts(cfg, at_7) == at_7
     assert report.is_report_time(cfg, at_7) is True
     assert report.is_report_time(cfg, before_7) is False
 

@@ -5,7 +5,7 @@ import html
 import re
 import sqlite3
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from . import llm, mail, store
@@ -20,6 +20,15 @@ def local_now(cfg: Config, now: float | None = None) -> datetime:
 
 def local_date(cfg: Config, now: float | None = None) -> str:
     return local_now(cfg, now).date().isoformat()
+
+
+def local_report_ts(cfg: Config, now: float | None = None) -> float:
+    """Epoch seconds for today's configured report time in local time."""
+    local = local_now(cfg, now)
+    hour, minute = cfg.report.hour_minute
+    tz = timezone(timedelta(hours=cfg.report.utc_offset_hours))
+    report_dt = datetime(local.year, local.month, local.day, hour, minute, tzinfo=tz)
+    return report_dt.timestamp()
 
 
 def is_report_time(cfg: Config, now: float | None = None) -> bool:
