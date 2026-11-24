@@ -10,7 +10,7 @@ It runs on a **Fly.io Sprite** — a persistent, hardware-isolated VM that sleep
 and wakes on request. That gives the agent real local state (SQLite) without paying for an
 always-on server.
 
-> **Status: WIP** — v1 targets the 5 seed nodes and preview node. Websites are out of
+> **Status: WIP** — v1 targets the 5 seed nodes and preview/interactive node. Websites are out of
 > scope for now.
 
 ---
@@ -19,7 +19,8 @@ always-on server.
 
 Running a blockchain means babysitting seed nodes. HumidityDome does the babysitting: it
 turns noisy node JSON into a one-line-per-node morning email, and pings you the moment a
-node goes dark, loses peers, or stops syncing.
+node goes dark, loses peers, or stops syncing. So you can proactively track version-specific 
+performance and tend to your seeds before they sprout poorly.
 
 ## How it works
 
