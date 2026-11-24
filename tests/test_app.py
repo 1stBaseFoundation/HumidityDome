@@ -213,3 +213,16 @@ def test_report_latest_returns_most_recent(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert "summary" in response.json()
+
+
+def test_manual_report_does_not_block_daily(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(app_module.report, "is_report_time", lambda cfg, now=None: True)
+
+    # A manual report is sent first.
+    assert client.post("/report").status_code == 200
+
+    reset_tick()
+    body = client.post("/tick").json()
+
+    # The scheduled 09:00 summary still goes out.
+    assert body["report_sent"] is True

@@ -2,7 +2,7 @@
 
 > Infrastructure heartbeat for the 1stBase blockchain. Polls the 6 nodes (5 seeds +
 > preview node) every 30 minutes, validates sync / peer / version state, emails a daily
-> summary at **07:00 UTC+2**, and sends instant alerts when a node faults. Runs on a
+> summary at **09:00 UTC+2**, and sends instant alerts when a node faults. Runs on a
 > Fly.io Sprite that sleeps between ticks.
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done
@@ -72,7 +72,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] Rollup → Groq → HTML → Resend
 - [x] Deterministic table + LLM prose
 - [x] `mark_report_sent` / `is_report_time` (UTC+2)
-- [x] 07:00 report fires even if an earlier manual report was sent that day
+- [x] 09:00 report fires even if an earlier manual report was sent that day
 
 ## 9. API
 - [x] `app.py` FastAPI

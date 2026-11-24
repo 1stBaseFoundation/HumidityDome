@@ -75,9 +75,11 @@ CREATE TABLE IF NOT EXISTS incidents (
 CREATE INDEX IF NOT EXISTS idx_incidents_node ON incidents(node, opened_ts);
 
 CREATE TABLE IF NOT EXISTS daily_reports (
-    date TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    kind TEXT NOT NULL,
     sent_ts REAL NOT NULL,
-    summary TEXT
+    summary TEXT,
+    PRIMARY KEY (date, kind)
 );
 
 CREATE TABLE IF NOT EXISTS meta (
@@ -120,7 +122,41 @@ def connect(path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring older daily_reports tables up to the (date, kind) schema."""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(daily_reports)")}
+    if "kind" not in cols:
+        conn.execute(
+            "ALTER TABLE daily_reports ADD COLUMN kind TEXT NOT NULL DEFAULT 'scheduled'"
+        )
+        conn.commit()
+
+    pk = [
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(daily_reports)")
+        if row["pk"]
+    ]
+    if pk == ["date"]:
+        conn.executescript(
+            """
+            CREATE TABLE daily_reports_new (
+                date TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                sent_ts REAL NOT NULL,
+                summary TEXT,
+                PRIMARY KEY (date, kind)
+            );
+            INSERT INTO daily_reports_new (date, kind, sent_ts, summary)
+                SELECT date, kind, sent_ts, summary FROM daily_reports;
+            DROP TABLE daily_reports;
+            ALTER TABLE daily_reports_new RENAME TO daily_reports;
+            """
+        )
+        conn.commit()
 
 
 def _row_to_sample(row: sqlite3.Row) -> Sample:
@@ -302,7 +338,10 @@ def resolve_incident(conn: sqlite3.Connection, node: str) -> None:
 
 
 def get_report(conn: sqlite3.Connection, date: str) -> dict[str, Any] | None:
-    row = conn.execute("SELECT * FROM daily_reports WHERE date = ?", (date,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM daily_reports WHERE date = ? ORDER BY sent_ts DESC LIMIT 1",
+        (date,),
+    ).fetchone()
     return dict(row) if row else None
 
 
@@ -313,33 +352,39 @@ def get_latest_report(conn: sqlite3.Connection) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def mark_report_sent(conn: sqlite3.Connection, date: str, summary: str) -> None:
+def mark_report_sent(
+    conn: sqlite3.Connection,
+    date: str,
+    summary: str,
+    kind: str = "scheduled",
+) -> None:
     conn.execute(
         """
-        INSERT INTO daily_reports (date, sent_ts, summary) VALUES (?,?,?)
-        ON CONFLICT(date) DO UPDATE SET
+        INSERT INTO daily_reports (date, kind, sent_ts, summary) VALUES (?,?,?,?)
+        ON CONFLICT(date, kind) DO UPDATE SET
             sent_ts = excluded.sent_ts,
             summary = excluded.summary
         """,
-        (date, time.time(), summary),
+        (date, kind, time.time(), summary),
     )
     conn.commit()
 
 
 def was_report_sent(conn: sqlite3.Connection, date: str) -> bool:
+    """True if any report (manual or scheduled) exists for this date."""
     row = conn.execute("SELECT 1 FROM daily_reports WHERE date = ?", (date,)).fetchone()
     return row is not None
 
 
-def report_sent_since(conn: sqlite3.Connection, date: str, since_ts: float) -> bool:
-    """True if a report for this date was sent at or after ``since_ts``.
+def scheduled_report_sent(conn: sqlite3.Connection, date: str) -> bool:
+    """True if the automatic daily summary was sent for this date.
 
-    This lets the 07:00 report fire even if a manual report went out earlier
-    the same day (e.g. a test run at 01:15).
+    Manual `/report` runs are stored with kind='manual' and never block the
+    scheduled 09:00 summary.
     """
     row = conn.execute(
-        "SELECT 1 FROM daily_reports WHERE date = ? AND sent_ts >= ?",
-        (date, since_ts),
+        "SELECT 1 FROM daily_reports WHERE date = ? AND kind = 'scheduled'",
+        (date,),
     ).fetchone()
     return row is not None
 

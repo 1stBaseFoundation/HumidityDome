@@ -5,7 +5,7 @@ import html
 import re
 import sqlite3
 import time
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from . import llm, mail, store
@@ -20,15 +20,6 @@ def local_now(cfg: Config, now: float | None = None) -> datetime:
 
 def local_date(cfg: Config, now: float | None = None) -> str:
     return local_now(cfg, now).date().isoformat()
-
-
-def local_report_ts(cfg: Config, now: float | None = None) -> float:
-    """Epoch seconds for today's configured report time in local time."""
-    local = local_now(cfg, now)
-    hour, minute = cfg.report.hour_minute
-    tz = timezone(timedelta(hours=cfg.report.utc_offset_hours))
-    report_dt = datetime(local.year, local.month, local.day, hour, minute, tzinfo=tz)
-    return report_dt.timestamp()
 
 
 def is_report_time(cfg: Config, now: float | None = None) -> bool:
@@ -130,8 +121,14 @@ async def build_and_send_report(
     conn: sqlite3.Connection,
     cfg: Config,
     now: float | None = None,
+    kind: str = "scheduled",
 ) -> dict[str, Any]:
-    """Compile the last 24 h, summarise it, and email it."""
+    """Compile the last 24 h, summarise it, and email it.
+
+    ``kind`` is stored on the report row: ``scheduled`` for the automatic 09:00
+    summary, ``manual`` for a forced ``POST /report``. Only scheduled reports
+    count toward "already sent today".
+    """
     now = time.time() if now is None else now
     since = now - 24 * 3600
 
@@ -143,6 +140,6 @@ async def build_and_send_report(
     subject = f"HumidityDome daily report — {date}"
 
     await mail.send_email(cfg.report.to_email, subject, body, cfg)
-    store.mark_report_sent(conn, date, summary)
+    store.mark_report_sent(conn, date, summary, kind=kind)
 
-    return {"date": date, "subject": subject, "summary": summary}
+    return {"date": date, "subject": subject, "summary": summary, "kind": kind}

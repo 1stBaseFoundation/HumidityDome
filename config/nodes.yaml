@@ -5,7 +5,7 @@ poll:
   user_agent: "HumidityDome/1.0"
 
 report:
-  time_local: "07:00"        # local time (see utc_offset_hours)
+  time_local: "09:00"        # local time (see utc_offset_hours)
   utc_offset_hours: 2        # fixed UTC+2
   to_email: "info@1stbase.org"
   from_email: "noreply@1stbase.org"

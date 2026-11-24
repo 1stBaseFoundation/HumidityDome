@@ -28,13 +28,12 @@ def make_cfg(dry_run: bool = True) -> Config:
 
 def test_local_date_and_report_time() -> None:
     cfg = make_cfg()
-    at_7 = datetime(2026, 11, 23, 5, 0, tzinfo=UTC).timestamp()  # 07:00 UTC+2
-    before_7 = datetime(2026, 11, 23, 4, 59, tzinfo=UTC).timestamp()
+    at_9 = datetime(2026, 11, 23, 7, 0, tzinfo=UTC).timestamp()  # 09:00 UTC+2
+    before_9 = datetime(2026, 11, 23, 6, 59, tzinfo=UTC).timestamp()
 
-    assert report.local_date(cfg, at_7) == "2026-11-23"
-    assert report.local_report_ts(cfg, at_7) == at_7
-    assert report.is_report_time(cfg, at_7) is True
-    assert report.is_report_time(cfg, before_7) is False
+    assert report.local_date(cfg, at_9) == "2026-11-23"
+    assert report.is_report_time(cfg, at_9) is True
+    assert report.is_report_time(cfg, before_9) is False
 
 
 def test_render_html_contains_key_data() -> None:

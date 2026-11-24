@@ -28,7 +28,7 @@ class PollConfig:
 
 @dataclass
 class ReportConfig:
-    time_local: str = "07:00"
+    time_local: str = "09:00"
     utc_offset_hours: int = 2
     to_email: str = "info@1stbase.org"
     from_email: str = "noreply@1stbase.org"

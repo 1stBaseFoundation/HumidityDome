@@ -27,7 +27,7 @@ def test_report_and_alert_defaults(monkeypatch) -> None:
     cfg = load_config(CONFIG)
 
     assert cfg.report.utc_offset_hours == 2
-    assert cfg.report.hour_minute == (7, 0)
+    assert cfg.report.hour_minute == (9, 0)
     assert cfg.report.to_email == "info@1stbase.org"
     assert cfg.report.from_email == "noreply@1stbase.org"
     assert cfg.report.reply_to == "info@1stbase.org"

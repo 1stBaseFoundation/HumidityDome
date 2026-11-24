@@ -118,12 +118,12 @@ twice in one day. Recovery notices are still sent when it comes back.
 
 ## Daily report
 
-At **07:00 UTC+2** the agent compiles the last 24 h into a compact rollup, asks
+At **09:00 UTC+2** the agent compiles the last 24 h into a compact rollup, asks
 `qwen/qwen3.8-27b` (Groq) to write a professional summary, and emails it to
 `info@1stbase.org` via a Resend **Sprites connector**.
 
 It sends even if a manual test report went out earlier the same day — only a report sent
-**after 07:00** counts as today's.
+**after 09:00** counts as today's.
 
 ## Screenshot
 

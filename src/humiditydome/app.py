@@ -100,8 +100,7 @@ async def run_tick(now: float | None = None) -> dict[str, Any]:
     report_sent = False
     if report.is_report_time(cfg, now):
         report_date = report.local_date(cfg, now)
-        since = report.local_report_ts(cfg, now)
-        if not store.report_sent_since(conn, report_date, since):
+        if not store.scheduled_report_sent(conn, report_date):
             await report.build_and_send_report(conn, cfg, now)
             report_sent = True
 
@@ -175,4 +174,4 @@ def get_report(
 
 @app.post("/report")
 async def force_report() -> dict[str, Any]:
-    return await report.build_and_send_report(conn, cfg)
+    return await report.build_and_send_report(conn, cfg, kind="manual")

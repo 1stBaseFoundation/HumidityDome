@@ -1,6 +1,7 @@
 """SQLite persistence."""
 from __future__ import annotations
 
+import sqlite3
 import time
 
 from humiditydome import store
@@ -85,16 +86,20 @@ def test_rollup_single_sample_percentile(tmp_path) -> None:
     assert rollup["nodes"][0]["lat_p95_ms"] == 20.0
 
 
-def test_report_sent_since(tmp_path) -> None:
+def test_scheduled_report_sent(tmp_path) -> None:
     conn = store.connect(str(tmp_path / "test.db"))
-    before = time.time() - 3600
 
-    assert store.report_sent_since(conn, "2026-11-24", before) is False
+    assert store.scheduled_report_sent(conn, "2026-11-24") is False
 
-    store.mark_report_sent(conn, "2026-11-24", "summary")
+    # A manual report must not block the scheduled summary.
+    store.mark_report_sent(conn, "2026-11-24", "manual summary", kind="manual")
+    assert store.scheduled_report_sent(conn, "2026-11-24") is False
 
-    assert store.report_sent_since(conn, "2026-11-24", before) is True
-    assert store.report_sent_since(conn, "2026-11-24", time.time() + 3600) is False
+    store.mark_report_sent(conn, "2026-11-24", "scheduled summary", kind="scheduled")
+    assert store.scheduled_report_sent(conn, "2026-11-24") is True
+
+    # Both reports coexist for the same date.
+    assert store.get_report(conn, "2026-11-24") is not None
 
 
 def test_prune_old_data(tmp_path) -> None:
@@ -116,3 +121,30 @@ def test_prune_old_data(tmp_path) -> None:
     remaining = store.samples_since(conn, 0.0)
     assert len(remaining) == 1
     assert remaining[0].ts == new
+
+
+def test_migrate_old_daily_reports_schema(tmp_path) -> None:
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        """
+        CREATE TABLE daily_reports (
+            date TEXT PRIMARY KEY,
+            sent_ts REAL NOT NULL,
+            summary TEXT
+        );
+        INSERT INTO daily_reports (date, sent_ts, summary)
+            VALUES ('2026-11-23', 123.0, 'old report');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    conn = store.connect(str(db))
+
+    assert store.scheduled_report_sent(conn, "2026-11-23") is True
+    assert store.get_report(conn, "2026-11-23")["kind"] == "scheduled"
+
+    # Manual and scheduled reports can now coexist for the same date.
+    store.mark_report_sent(conn, "2026-11-23", "manual report", kind="manual")
+    assert store.get_report(conn, "2026-11-23")["summary"] in {"old report", "manual report"}
