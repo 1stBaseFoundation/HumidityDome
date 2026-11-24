@@ -221,3 +221,24 @@ def test_fleet_recovery(tmp_path) -> None:
     second = alerts.fleet_alerts(conn, samples, nodes, AlertConfig())
 
     assert [alert.kind for alert in second] == ["recovery"]
+
+
+def test_new_incident_within_cooldown_is_silent(tmp_path) -> None:
+    conn = store.connect(str(tmp_path / "test.db"))
+    cfg = AlertConfig(consecutive_failures=1, cooldown_minutes=1440, send_recovery=True)
+
+    first = alerts.process_sample(
+        conn, make_sample(ok=False, error="x"), store.get_node_state(conn, "seed-test"), cfg
+    )
+    assert [alert.kind for alert in first] == ["unreachable"]
+
+    # Recover.
+    alerts.process_sample(
+        conn, make_sample(), store.get_node_state(conn, "seed-test"), cfg
+    )
+
+    # Fail again within 24h: the incident opens, but no second alert email.
+    second = alerts.process_sample(
+        conn, make_sample(ok=False, error="x"), store.get_node_state(conn, "seed-test"), cfg
+    )
+    assert second == []

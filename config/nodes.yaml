@@ -15,7 +15,7 @@ alerts:
   consecutive_failures: 2
   peer_drop_fraction: 0.40
   peer_min: null             # null -> use each node's reported minPeers
-  cooldown_minutes: 60
+  cooldown_minutes: 1440       # repeat alerts at most once per day per node
   send_recovery: true
   clock_skew_seconds: 30
   stale_peer_seconds: 86400

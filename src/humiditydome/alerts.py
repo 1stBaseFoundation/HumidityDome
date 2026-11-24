@@ -166,13 +166,16 @@ def process_sample(
     if sample.peer_count is not None:
         state.last_peer_count = sample.peer_count
 
+    cooldown_seconds = cfg.cooldown_minutes * 60
+
     if not is_fault:
         # Healthy. If an incident is open, this is a recovery.
         if state.open_incident_id is not None:
             incident_id = state.open_incident_id
             store.resolve_incident(conn, sample.node)
             state.open_incident_id = None
-            state.last_alert_ts = now
+            # Do not touch last_alert_ts here: the alert window is per node, not
+            # per incident, so a flap inside the window stays quiet.
             store.upsert_node_state(conn, state)
             if cfg.send_recovery:
                 return [
@@ -196,6 +199,9 @@ def process_sample(
     # Fault path.
     should_open = state.consecutive_failures >= cfg.consecutive_failures
     immediate = any(alert.kind == "peers_low" for alert in alerts)
+    within_cooldown = (
+        state.last_alert_ts is not None and (now - state.last_alert_ts) < cooldown_seconds
+    )
 
     if (should_open or immediate) and state.open_incident_id is None:
         worst = _worst(alerts)
@@ -203,13 +209,18 @@ def process_sample(
             conn, sample.node, worst.kind, worst.severity, _details(alerts)
         )
         state.open_incident_id = incident_id
-        state.last_alert_ts = now
+        if not within_cooldown:
+            state.last_alert_ts = now
+            store.upsert_node_state(conn, state)
+            return [Alert(**{**worst.__dict__, "title": f"ALERT: {worst.title}"})]
+        # An alert for this node already went out recently; open the incident
+        # silently and let the daily report cover it.
         store.upsert_node_state(conn, state)
-        return [Alert(**{**worst.__dict__, "title": f"ALERT: {worst.title}"})]
+        return []
 
     if state.open_incident_id is not None:
-        # Incident already open: re-notify only after the cooldown.
-        if state.last_alert_ts is None or (now - state.last_alert_ts) >= cfg.cooldown_minutes * 60:
+        # Incident already open: re-notify only after the cooldown (default 24h).
+        if not within_cooldown:
             worst = _worst(alerts)
             state.last_alert_ts = now
             store.upsert_node_state(conn, state)

@@ -54,10 +54,6 @@ async def _dispatch_alerts(alerts_list: list[Alert]) -> None:
     """Send one email per node that has alerts."""
     grouped: dict[str, list[Alert]] = {}
     for alert in alerts_list:
-        print(
-            f"[G3:tick] alert node={alert.node} kind={alert.kind} severity={alert.severity}",
-            flush=True,
-        )
         grouped.setdefault(alert.node, []).append(alert)
 
     for node, items in grouped.items():
@@ -72,12 +68,10 @@ async def _dispatch_alerts(alerts_list: list[Alert]) -> None:
 
 async def run_tick(now: float | None = None) -> dict[str, Any]:
     now = time.time() if now is None else now
-    print(f"[G3:tick] entry nodes={len(cfg.nodes)} dry_run={cfg.dry_run}", flush=True)
 
     last_tick = store.get_meta(conn, "last_tick_ts")
     interval = cfg.poll.interval_minutes * 60
     if last_tick and (now - float(last_tick)) < interval * 0.5:
-        print(f"[G3:tick] skip reason=too-soon last_tick={last_tick}", flush=True)
         return {
             "ok": True,
             "skipped": True,
@@ -87,8 +81,6 @@ async def run_tick(now: float | None = None) -> dict[str, Any]:
     store.set_meta(conn, "last_tick_ts", str(now))
 
     samples = await _probe_all(now)
-    up = sum(1 for sample in samples.values() if sample.ok)
-    print(f"[G3:tick] probed up={up} down={len(samples) - up}", flush=True)
 
     out_alerts: list[Alert] = []
     per_node: dict[str, Sample] = {}
@@ -109,7 +101,6 @@ async def run_tick(now: float | None = None) -> dict[str, Any]:
         conn, report.local_date(cfg, now)
     ):
         await report.build_and_send_report(conn, cfg, now)
-        print(f"[G3:tick] report date={report.local_date(cfg, now)} sent=true", flush=True)
         report_sent = True
 
     return {

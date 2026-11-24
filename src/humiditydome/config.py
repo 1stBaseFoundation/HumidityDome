@@ -45,7 +45,7 @@ class AlertConfig:
     consecutive_failures: int = 2
     peer_drop_fraction: float = 0.40
     peer_min: int | None = None
-    cooldown_minutes: int = 60
+    cooldown_minutes: int = 1440
     send_recovery: bool = True
     clock_skew_seconds: float = 30.0
     stale_peer_seconds: float = 86400.0

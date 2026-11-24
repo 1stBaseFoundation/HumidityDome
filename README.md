@@ -110,14 +110,21 @@ A node triggers an email alert when it:
 - has **clock skew** beyond the threshold
 - shows a **seed-to-seed peering gap**
 
-Alerts are debounced (default 2 consecutive failures) and rate-limited (per-node cooldown)
-to avoid spam.
+Alerts are debounced (default 2 consecutive failures). Once a node alerts, repeat
+notifications for that node are suppressed for 24 hours — a flapping node won't email you
+twice in one day. Recovery notices are still sent when it comes back.
 
 ## Daily report
 
 At **07:00 UTC+2** the agent compiles the last 24 h into a compact rollup, asks
 `qwen/qwen3.8-27b` (Groq) to write a professional summary, and emails it to
 `info@1stbase.org` via a Resend **Sprites connector**.
+
+## Screenshot
+
+![HumidityDome daily email summary](docs/screenshot-email-summary.png)
+
+*The daily report: raw node telemetry compiled into a clean, readable email.*
 
 ## Tech stack
 
