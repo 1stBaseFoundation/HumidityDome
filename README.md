@@ -152,10 +152,38 @@ sprite-env services create web \
 ```
 
 ### 5. GitHub Actions
-Add repo secrets:
 
-- `SPRITE_URL` — the Sprite's URL (`sprite info`)
-- `SPRITES_TOKEN` — Fly.io org token
+Add two repository secrets (**Settings → Secrets and variables → Actions**):
+
+- `SPRITE_URL` — the Sprite's URL from `sprite info`, e.g. `https://<sprite-name>-<org-id>.sprites.app`
+- `SPRITES_TOKEN` — a **Sprites token**, *not* a Fly.io organization token
+
+#### Which token goes in `SPRITES_TOKEN`?
+
+This is the easiest step to get wrong. Fly.io has two different token screens:
+
+| Where you create it | Token format | Works for Sprite URLs? |
+|---|---|---|
+| **Sprites → Tokens** (the Sprites dashboard) | `org-slug/org-id/token-id/token-value`, e.g. `1stbase/…` | ✅ Yes |
+| **Organization → Tokens** (Fly.io org settings) | `FlyV1…` | ❌ No — returns `401 {"error":"unauthorized"}` |
+
+Create the token under **Sprites → Tokens**, with the correct organization selected
+(the org that owns the Sprite — `1stbase` in this deployment). Sign in as the
+account that owns that org, then copy the **entire** token string.
+
+#### Troubleshooting `401 unauthorized`
+
+If the workflow fails with:
+
+```
+curl: (22) The requested URL returned error: 401
+{"error":"unauthorized"}
+```
+
+the `SPRITE_URL` is reachable but `SPRITES_TOKEN` is not a valid Sprites token.
+Almost always this means a `FlyV1…` Fly.io organization token was used instead of
+a **Sprites → Tokens** token. Recreate the token in the Sprites dashboard and
+update the secret.
 
 The workflow posts to `/tick` every 30 minutes.
 
@@ -182,6 +210,8 @@ Set `HUMIDITYDOME_DRYRUN=1` to skip real emails while developing.
 
 - No secrets in the repo. Groq / Resend tokens live in **Sprites connectors**;
   `SPRITES_TOKEN` lives in **GitHub Actions secrets**.
+- `SPRITES_TOKEN` must be a **Sprites → Tokens** token (`org-slug/…`), not a
+  Fly.io organization token (`FlyV1…`).
 - The Sprite URL is private by default (org-only, token-authenticated).
 
 ## License
