@@ -20,7 +20,7 @@ always-on server.
 Running a blockchain means babysitting seed nodes. HumidityDome does the babysitting: it
 turns noisy node JSON into a one-line-per-node morning email, and pings you the moment a
 node goes dark, loses peers, or stops syncing. So you can proactively track version-specific 
-performance and tend to your seeds before they sprout poorly.
+performance and tend to your seeds before they sprout poor branches on the network.
 
 ## How it works
 
