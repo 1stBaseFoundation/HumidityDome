@@ -1,6 +1,7 @@
 """HTTP probe for 1stBase seed nodes."""
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime
 from typing import Any
@@ -8,6 +9,16 @@ from typing import Any
 import httpx
 
 from .models import NodeConfig, Sample
+
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _clean_str(value: Any, max_len: int = 200) -> str | None:
+    """Strip control characters, collapse whitespace, and truncate."""
+    if not isinstance(value, str):
+        return None
+    cleaned = _CONTROL_CHARS.sub(" ", value).strip()
+    return cleaned[:max_len] if cleaned else None
 
 
 def _as_int(value: Any) -> int | None:
@@ -53,7 +64,11 @@ def _parse(
     caps = data.get("capabilities") or {}
 
     peers = [p for p in (network.get("peers") or []) if isinstance(p, dict)]
-    peer_addresses = [str(p["address"]) for p in peers if p.get("address")]
+    peer_addresses = [
+        cleaned
+        for p in peers
+        if p.get("address") and (cleaned := _clean_str(str(p["address"]), 100))
+    ]
     inbound = sum(1 for p in peers if p.get("isInbound"))
     outbound = len(peers) - inbound
     stale = sum(1 for p in peers if _is_stale(p.get("lastSeen"), now, stale_after_s))
@@ -76,8 +91,8 @@ def _parse(
         ts=now,
         ok=True,
         latency_ms=round(latency_ms, 1),
-        state=data.get("state"),
-        version=data.get("version"),
+        state=_clean_str(data.get("state"), 50),
+        version=_clean_str(data.get("version"), 50),
         current_height=_as_int(sync.get("currentHeight")),
         target_height=_as_int(sync.get("targetHeight")),
         p2p_height=_as_int(sync.get("p2pHeight")),
@@ -85,7 +100,7 @@ def _parse(
         height_divergence=divergence,
         tolerance=_as_int(sync.get("tolerance")),
         is_synchronized=_as_bool(sync.get("isSynchronized")),
-        sync_reason=sync.get("reason"),
+        sync_reason=_clean_str(sync.get("reason"), 200),
         peer_count=_as_int(network.get("peerCount")),
         min_peers=_as_int(network.get("minPeers")),
         active_connections=_as_int(network.get("activeConnections")),
@@ -93,7 +108,7 @@ def _parse(
         outbound_peers=outbound,
         stale_peers=stale,
         peer_addresses=peer_addresses,
-        congestion_level=stats.get("congestionLevel"),
+        congestion_level=_clean_str(stats.get("congestionLevel"), 50),
         pending_swaps=_as_int(stats.get("pendingSwaps")),
         cached_transactions=_as_int(stats.get("cachedTransactions")),
         can_mine=_as_bool(caps.get("canMine")),
@@ -126,7 +141,7 @@ async def fetch_status(
             ts=now,
             ok=False,
             latency_ms=round(latency_ms, 1),
-            error=f"{type(exc).__name__}: {exc}",
+            error=f"{type(exc).__name__}: {_clean_str(str(exc), 200) or ''}",
         )
 
     if response.status_code != 200:
@@ -148,7 +163,7 @@ async def fetch_status(
             ts=now,
             ok=False,
             latency_ms=round(latency_ms, 1),
-            error=f"invalid JSON: {exc}",
+            error=f"invalid JSON: {_clean_str(str(exc), 200) or ''}",
         )
 
     if isinstance(data, dict) and data.get("success") is False:
@@ -158,8 +173,10 @@ async def fetch_status(
             ts=now,
             ok=False,
             latency_ms=round(latency_ms, 1),
-            state=data.get("state"),
-            error=str(data.get("reason") or data.get("error") or "success=false"),
+            state=_clean_str(data.get("state"), 50),
+            error=_clean_str(
+                str(data.get("reason") or data.get("error") or "success=false"), 200
+            ),
         )
 
     if not isinstance(data, dict):

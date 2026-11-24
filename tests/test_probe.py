@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from humiditydome.models import NodeConfig
-from humiditydome.probe import _as_int, _parse, fetch_status
+from humiditydome.probe import _as_int, _clean_str, _parse, fetch_status
 
 NODE = NodeConfig(name="seed-150", ip="150.136.172.164", port=3001)
 NOW = datetime(2026, 11, 23, 21, 16, 0, tzinfo=UTC).timestamp()
@@ -191,3 +191,10 @@ async def test_fetch_status_invalid_json() -> None:
 
     assert sample.ok is False
     assert "invalid JSON" in (sample.error or "")
+
+
+def test_clean_str_strips_control_chars_and_truncates() -> None:
+    assert _clean_str("hello\x00world") == "hello world"
+    assert _clean_str("x" * 300, 10) == "x" * 10
+    assert _clean_str(None) is None
+    assert _clean_str("") is None

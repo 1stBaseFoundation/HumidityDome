@@ -6,6 +6,7 @@ The GitHub Actions cron posts to /tick every 30 minutes.
 from __future__ import annotations
 
 import asyncio
+import html
 import os
 import time
 from pathlib import Path
@@ -58,10 +59,14 @@ async def _dispatch_alerts(alerts_list: list[Alert]) -> None:
 
     for node, items in grouped.items():
         lines = "".join(
-            f"<li><b>{alert.severity.upper()}</b> — {alert.title}: {alert.detail}</li>"
+            f"<li><b>{html.escape(alert.severity.upper())}</b> — "
+            f"{html.escape(alert.title)}: {html.escape(alert.detail)}</li>"
             for alert in items
         )
-        body = f"<h3>HumidityDome alert — {node}</h3><ul>{lines}</ul>"
+        body = (
+            f"<h3>HumidityDome alert — {html.escape(node)}</h3>"
+            f"<ul>{lines}</ul>"
+        )
         subject = f"HumidityDome alert — {node}"
         await mail.send_email(cfg.report.to_email, subject, body, cfg)
 
@@ -174,4 +179,9 @@ def get_report(
 
 @app.post("/report")
 async def force_report() -> dict[str, Any]:
-    return await report.build_and_send_report(conn, cfg, kind="manual")
+    last = store.get_meta(conn, "last_manual_report_ts")
+    if last and (time.time() - float(last)) < 300:
+        raise HTTPException(429, "manual report cooldown (5 min)")
+    result = await report.build_and_send_report(conn, cfg, kind="manual")
+    store.set_meta(conn, "last_manual_report_ts", str(time.time()))
+    return result

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from humiditydome import app as app_module
 from humiditydome import store
-from humiditydome.models import Sample
+from humiditydome.models import Alert, Sample
 
 
 def make_sample(node: str, ip: str, ts: float, **overrides: object) -> Sample:
@@ -226,3 +226,32 @@ def test_manual_report_does_not_block_daily(client: TestClient, monkeypatch) -> 
 
     # The scheduled 09:00 summary still goes out.
     assert body["report_sent"] is True
+
+
+async def test_alert_html_is_escaped(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    async def fake_send(to, subject, html_body, cfg):
+        captured["body"] = html_body
+
+    monkeypatch.setattr(app_module.mail, "send_email", fake_send)
+    alert = Alert(
+        node="seed-x",
+        kind="sync",
+        severity="critical",
+        title="<b>bad</b>",
+        detail="<script>alert(1)</script>",
+    )
+
+    await app_module._dispatch_alerts([alert])
+
+    assert "<script>" not in captured["body"]
+    assert "&lt;script&gt;" in captured["body"]
+
+
+def test_manual_report_cooldown(client: TestClient) -> None:
+    first = client.post("/report")
+    assert first.status_code == 200
+
+    second = client.post("/report")
+    assert second.status_code == 429

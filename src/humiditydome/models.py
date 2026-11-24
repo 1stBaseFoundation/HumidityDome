@@ -18,6 +18,17 @@ class NodeConfig:
     seed_ip: str | None = None
 
     def __post_init__(self) -> None:
+        if self.scheme not in {"http", "https"}:
+            raise ValueError(f"scheme must be http or https: {self.scheme!r}")
+        if not (0 < self.port < 65536):
+            raise ValueError(f"port out of range: {self.port}")
+        if not self.path.startswith("/"):
+            raise ValueError(f"path must start with '/': {self.path!r}")
+        if "@" in self.path or "://" in self.path:
+            raise ValueError(f"path contains invalid characters: {self.path!r}")
+        if "@" in self.ip or "/" in self.ip or "://" in self.ip:
+            raise ValueError(f"ip contains invalid characters: {self.ip!r}")
+
         if self.seed_ip is None:
             try:
                 ipaddress.ip_address(self.ip)

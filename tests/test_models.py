@@ -1,6 +1,8 @@
 """Data models."""
 from __future__ import annotations
 
+import pytest
+
 from humiditydome.models import NodeConfig, Sample
 
 
@@ -31,3 +33,17 @@ def test_https_node_config() -> None:
 
     assert node.url == "https://node.1stbase.org:443/api/node/state/status"
     assert node.seed_ip is None
+
+
+def test_node_config_rejects_bad_url_parts() -> None:
+    with pytest.raises(ValueError):
+        NodeConfig(name="x", ip="evil.com", port=3001, path="@bad")
+
+    with pytest.raises(ValueError):
+        NodeConfig(name="x", ip="evil.com", port=3001, path="api")
+
+    with pytest.raises(ValueError):
+        NodeConfig(name="x", ip="a@b.com", port=3001)
+
+    with pytest.raises(ValueError):
+        NodeConfig(name="x", ip="evil.com", port=3001, scheme="ftp")
