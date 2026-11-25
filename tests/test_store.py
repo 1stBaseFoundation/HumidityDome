@@ -4,6 +4,8 @@ from __future__ import annotations
 import sqlite3
 import time
 
+import pytest
+
 from humiditydome import store
 from humiditydome.models import NodeConfig, Sample
 
@@ -148,3 +150,33 @@ def test_migrate_old_daily_reports_schema(tmp_path) -> None:
     # Manual and scheduled reports can now coexist for the same date.
     store.mark_report_sent(conn, "2026-11-23", "manual report", kind="manual")
     assert store.get_report(conn, "2026-11-23")["summary"] in {"old report", "manual report"}
+
+
+def test_transaction_commits_on_success(tmp_path) -> None:
+    conn = store.connect(str(tmp_path / "test.db"))
+
+    with store.transaction(conn):
+        store.insert_sample(conn, make_sample(ts=1.0))
+        store.set_meta(conn, "last_tick_ts", "1.0")
+
+    assert store.get_meta(conn, "last_tick_ts") == "1.0"
+    assert len(store.samples_since(conn, 0.0)) == 1
+
+
+def test_transaction_rolls_back_on_error(tmp_path) -> None:
+    conn = store.connect(str(tmp_path / "test.db"))
+
+    with pytest.raises(RuntimeError), store.transaction(conn):
+        store.insert_sample(conn, make_sample(ts=1.0))
+        store.set_meta(conn, "last_tick_ts", "1.0")
+        raise RuntimeError("boom")
+
+    # Nothing persisted: the whole unit rolled back.
+    assert store.get_meta(conn, "last_tick_ts") is None
+    assert store.samples_since(conn, 0.0) == []
+
+
+def test_check_integrity_ok(tmp_path) -> None:
+    conn = store.connect(str(tmp_path / "test.db"))
+
+    assert store.check_integrity(conn) == "ok"

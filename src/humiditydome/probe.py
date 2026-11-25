@@ -8,7 +8,10 @@ from typing import Any
 
 import httpx
 
+from .logging_setup import get_logger, kv
 from .models import NodeConfig, Sample
+
+logger = get_logger("humiditydome.probe")
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -135,16 +138,30 @@ async def fetch_status(
         latency_ms = (time.monotonic() - start) * 1000.0
     except Exception as exc:  # noqa: BLE001 - any transport failure is a failed probe
         latency_ms = (time.monotonic() - start) * 1000.0
+        error = f"{type(exc).__name__}: {_clean_str(str(exc), 200) or ''}"
+        logger.warning(
+            "probe %s",
+            kv(phase="transport_error", node=node.name, latency_ms=round(latency_ms, 1), error=error),
+        )
         return Sample(
             node=node.name,
             ip=node.ip,
             ts=now,
             ok=False,
             latency_ms=round(latency_ms, 1),
-            error=f"{type(exc).__name__}: {_clean_str(str(exc), 200) or ''}",
+            error=error,
         )
 
     if response.status_code != 200:
+        logger.warning(
+            "probe %s",
+            kv(
+                phase="http_error",
+                node=node.name,
+                status=response.status_code,
+                latency_ms=round(latency_ms, 1),
+            ),
+        )
         return Sample(
             node=node.name,
             ip=node.ip,

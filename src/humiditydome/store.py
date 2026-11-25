@@ -9,6 +9,8 @@ import json
 import math
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -117,13 +119,65 @@ def _percentile(values: list[float], percentile: float) -> float | None:
 def connect(path: str) -> sqlite3.Connection:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(target), check_same_thread=False)
+    conn = sqlite3.connect(str(target), check_same_thread=False, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.executescript(SCHEMA)
     _migrate(conn)
     return conn
+
+
+# Depth of active transaction() blocks, keyed by connection id. Used to defer
+# inner commit() calls to the enclosing block so a whole tick is atomic.
+_tx_depth: dict[int, int] = {}
+
+
+def _in_transaction(conn: sqlite3.Connection) -> bool:
+    return _tx_depth.get(id(conn), 0) > 0
+
+
+def commit(conn: sqlite3.Connection) -> None:
+    """Commit unless inside a transaction() block (deferred to that block)."""
+    if not _in_transaction(conn):
+        conn.commit()
+
+
+@contextmanager
+def transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    """Group writes into one atomic unit.
+
+    On a clean exit the block commits once; on any error it rolls back. Nested
+    blocks join the outer transaction. With ``isolation_level=None`` the driver
+    never issues implicit BEGINs, so this is the sole transaction boundary.
+    """
+    key = id(conn)
+    if _tx_depth.get(key, 0) > 0:
+        _tx_depth[key] += 1
+        try:
+            yield
+        finally:
+            _tx_depth[key] -= 1
+        return
+
+    conn.execute("BEGIN IMMEDIATE")
+    _tx_depth[key] = 1
+    try:
+        yield
+    except BaseException:
+        _tx_depth[key] = 0
+        conn.rollback()
+        raise
+    else:
+        _tx_depth[key] = 0
+        conn.commit()
+
+
+def check_integrity(conn: sqlite3.Connection) -> str:
+    """Return 'ok' or a description of the first integrity problem."""
+    row = conn.execute("PRAGMA quick_check").fetchone()
+    result = row[0] if row else "ok"
+    return "ok" if result == "ok" else str(result)
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -133,7 +187,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE daily_reports ADD COLUMN kind TEXT NOT NULL DEFAULT 'scheduled'"
         )
-        conn.commit()
+        commit(conn)
 
     pk = [
         row["name"]
@@ -156,7 +210,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             ALTER TABLE daily_reports_new RENAME TO daily_reports;
             """
         )
-        conn.commit()
+        commit(conn)
 
 
 def _row_to_sample(row: sqlite3.Row) -> Sample:
@@ -240,7 +294,7 @@ def insert_sample(conn: sqlite3.Connection, sample: Sample) -> int:
             sample.error,
         ),
     )
-    conn.commit()
+    commit(conn)
     return int(cur.lastrowid)
 
 
@@ -311,7 +365,7 @@ def upsert_node_state(conn: sqlite3.Connection, state: NodeState) -> None:
             state.first_seen_version,
         ),
     )
-    conn.commit()
+    commit(conn)
 
 
 def open_incident(
@@ -325,7 +379,7 @@ def open_incident(
         "INSERT INTO incidents (node, kind, severity, opened_ts, detail) VALUES (?,?,?,?,?)",
         (node, kind, severity, time.time(), detail),
     )
-    conn.commit()
+    commit(conn)
     return int(cur.lastrowid)
 
 
@@ -334,7 +388,7 @@ def resolve_incident(conn: sqlite3.Connection, node: str) -> None:
         "UPDATE incidents SET resolved_ts = ? WHERE node = ? AND resolved_ts IS NULL",
         (time.time(), node),
     )
-    conn.commit()
+    commit(conn)
 
 
 def get_report(conn: sqlite3.Connection, date: str) -> dict[str, Any] | None:
@@ -367,7 +421,7 @@ def mark_report_sent(
         """,
         (date, kind, time.time(), summary),
     )
-    conn.commit()
+    commit(conn)
 
 
 def was_report_sent(conn: sqlite3.Connection, date: str) -> bool:
@@ -399,7 +453,7 @@ def prune_old_data(conn: sqlite3.Connection, retention_days: int = 7) -> dict[st
     reports = conn.execute(
         "DELETE FROM daily_reports WHERE sent_ts < ?", (cutoff,)
     ).rowcount
-    conn.commit()
+    commit(conn)
     return {"samples": samples, "incidents": incidents, "reports": reports}
 
 
@@ -416,7 +470,7 @@ def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
         """,
         (key, value),
     )
-    conn.commit()
+    commit(conn)
 
 
 def build_rollup(

@@ -9,6 +9,7 @@ import asyncio
 import html
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +18,12 @@ from fastapi import FastAPI, HTTPException, Query
 
 from . import alerts, mail, report, store
 from .config import load_config
+from .logging_setup import configure_logging, get_logger, kv
 from .models import Alert, Sample
 from .probe import fetch_status
+
+configure_logging()
+logger = get_logger("humiditydome.app")
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = os.environ.get(
@@ -28,7 +33,21 @@ CONFIG_PATH = os.environ.get(
 cfg = load_config(CONFIG_PATH)
 conn = store.connect(cfg.database)
 
+logger.info(
+    "startup %s",
+    kv(
+        database=cfg.database,
+        nodes=len(cfg.nodes),
+        dry_run=cfg.dry_run,
+        interval_minutes=cfg.poll.interval_minutes,
+    ),
+)
+
 app = FastAPI(title="HumidityDome", version="0.1.0")
+
+# Single-flight guard: only one tick runs at a time in this process. In-memory
+# only — a restart clears it, nothing to hang across a dirty shutdown.
+_tick_lock = asyncio.Lock()
 
 
 async def _probe_all(now: float) -> dict[str, Sample]:
@@ -72,43 +91,112 @@ async def _dispatch_alerts(alerts_list: list[Alert]) -> None:
 
 
 async def run_tick(now: float | None = None) -> dict[str, Any]:
+    if _tick_lock.locked():
+        logger.info("tick %s", kv(phase="skipped", reason="run in progress"))
+        return {"ok": True, "skipped": True, "reason": "run in progress"}
+    async with _tick_lock:
+        return await _run_tick_locked(now)
+
+
+async def _run_tick_locked(now: float | None = None) -> dict[str, Any]:
     now = time.time() if now is None else now
+    run_id = uuid.uuid4().hex[:8]
+    started = time.monotonic()
+    logger.info("tick %s", kv(run_id=run_id, phase="begin", now=round(now, 3)))
 
     last_tick = store.get_meta(conn, "last_tick_ts")
     interval = cfg.poll.interval_minutes * 60
     if last_tick and (now - float(last_tick)) < interval * 0.5:
+        logger.info(
+            "tick %s",
+            kv(
+                run_id=run_id,
+                phase="skipped",
+                reason="tick too soon",
+                last_tick=float(last_tick),
+            ),
+        )
         return {
             "ok": True,
             "skipped": True,
             "reason": "tick too soon",
             "last_tick": float(last_tick),
         }
-    store.set_meta(conn, "last_tick_ts", str(now))
-    store.prune_old_data(conn, cfg.retention_days)
 
+    logger.info("tick %s", kv(run_id=run_id, phase="probe_begin", nodes=len(cfg.nodes)))
     samples = await _probe_all(now)
+    ok_count = sum(1 for sample in samples.values() if sample.ok)
+    for sample in samples.values():
+        if not sample.ok:
+            logger.warning(
+                "tick %s",
+                kv(
+                    run_id=run_id,
+                    phase="probe_failed",
+                    node=sample.node,
+                    latency_ms=sample.latency_ms,
+                    error=sample.error,
+                ),
+            )
+    logger.info(
+        "tick %s",
+        kv(run_id=run_id, phase="probe_done", ok=ok_count, total=len(samples)),
+    )
 
+    # All DB writes for the tick happen in one transaction. On a dirty shutdown
+    # mid-tick the WAL rolls the whole thing back, including last_tick_ts (written
+    # last), so the next run re-executes instead of skipping. No network I/O here.
     out_alerts: list[Alert] = []
     per_node: dict[str, Sample] = {}
-    for node in cfg.nodes:
-        sample = samples.get(node.name)
-        if sample is None:
-            continue
-        store.insert_sample(conn, sample)
-        state = store.get_node_state(conn, node.name)
-        out_alerts.extend(alerts.process_sample(conn, sample, state, cfg.alerts))
-        per_node[node.name] = sample
+    logger.info("tick %s", kv(run_id=run_id, phase="txn_begin"))
+    with store.transaction(conn):
+        store.prune_old_data(conn, cfg.retention_days)
+        for node in cfg.nodes:
+            sample = samples.get(node.name)
+            if sample is None:
+                continue
+            store.insert_sample(conn, sample)
+            logger.debug(
+                "tick %s",
+                kv(run_id=run_id, phase="insert", node=node.name, ok=sample.ok),
+            )
+            state = store.get_node_state(conn, node.name)
+            out_alerts.extend(alerts.process_sample(conn, sample, state, cfg.alerts))
+            per_node[node.name] = sample
 
-    out_alerts.extend(alerts.fleet_alerts(conn, per_node, cfg.nodes, cfg.alerts))
+        out_alerts.extend(alerts.fleet_alerts(conn, per_node, cfg.nodes, cfg.alerts))
+        logger.info(
+            "tick %s",
+            kv(run_id=run_id, phase="last_tick_write", old=last_tick, new=round(now, 3)),
+        )
+        store.set_meta(conn, "last_tick_ts", str(now))
+    logger.info(
+        "tick %s",
+        kv(run_id=run_id, phase="txn_commit", alerts=len(out_alerts)),
+    )
+
+    # Best-effort side effects run after the commit, outside the write lock.
     await _dispatch_alerts(out_alerts)
 
     report_sent = False
     if report.is_report_time(cfg, now):
         report_date = report.local_date(cfg, now)
         if not store.scheduled_report_sent(conn, report_date):
+            logger.info("tick %s", kv(run_id=run_id, phase="report_begin"))
             await report.build_and_send_report(conn, cfg, now)
             report_sent = True
 
+    logger.info(
+        "tick %s",
+        kv(
+            run_id=run_id,
+            phase="done",
+            dur_ms=round((time.monotonic() - started) * 1000, 1),
+            nodes=len(per_node),
+            alerts=len(out_alerts),
+            report_sent=report_sent,
+        ),
+    )
     return {
         "ok": True,
         "tick_ts": now,
@@ -131,16 +219,23 @@ async def run_tick(now: float | None = None) -> dict[str, Any]:
 
 @app.get("/healthz")
 def healthz() -> dict[str, Any]:
+    integrity = store.check_integrity(conn)
     return {
-        "ok": True,
+        "ok": integrity == "ok",
         "database": cfg.database,
         "nodes": len(cfg.nodes),
         "dry_run": cfg.dry_run,
+        "integrity": integrity,
     }
 
 
 @app.post("/tick")
 async def tick() -> dict[str, Any]:
+    logger.info("tick %s", kv(phase="http_request", endpoint="/tick"))
+    integrity = store.check_integrity(conn)
+    if integrity != "ok":
+        logger.error("tick %s", kv(phase="integrity_failed", detail=integrity))
+        raise HTTPException(status_code=503, detail=f"database integrity check failed: {integrity}")
     return await run_tick()
 
 

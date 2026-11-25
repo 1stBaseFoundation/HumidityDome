@@ -1,6 +1,7 @@
 """API endpoints and tick orchestration."""
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -255,3 +256,81 @@ def test_manual_report_cooldown(client: TestClient) -> None:
 
     second = client.post("/report")
     assert second.status_code == 429
+
+
+def test_healthz_reports_integrity(client: TestClient) -> None:
+    body = client.get("/healthz").json()
+
+    assert body["ok"] is True
+    assert body["integrity"] == "ok"
+
+
+def test_tick_503_on_integrity_failure(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(store, "check_integrity", lambda conn: "database disk image is malformed")
+    reset_tick()
+
+    response = client.post("/tick")
+
+    assert response.status_code == 503
+    assert "malformed" in response.json()["detail"]
+
+
+async def test_tick_skips_when_already_running(monkeypatch) -> None:
+    reset_tick()
+
+    gate = asyncio.Event()
+
+    async def gated_probe(now: float) -> dict[str, Sample]:
+        await gate.wait()
+        return {
+            node.name: make_sample(
+                node.name, node.ip, now, peer_addresses=seed_addresses(node.name)
+            )
+            for node in app_module.cfg.nodes
+        }
+
+    monkeypatch.setattr(app_module, "_probe_all", gated_probe)
+
+    first = asyncio.create_task(app_module.run_tick())
+    # Let the first tick acquire the lock and block inside the probe.
+    await asyncio.sleep(0)
+    second = await app_module.run_tick()
+
+    gate.set()
+    first_body = await first
+
+    assert second.get("skipped") is True
+    assert second["reason"] == "run in progress"
+    assert first_body.get("skipped") is not True
+
+
+async def test_tick_rolls_back_and_does_not_advance_on_failure(monkeypatch) -> None:
+    reset_tick()
+
+    async def fake_probe(now: float) -> dict[str, Sample]:
+        return {
+            node.name: make_sample(
+                node.name, node.ip, now, peer_addresses=seed_addresses(node.name)
+            )
+            for node in app_module.cfg.nodes
+        }
+
+    monkeypatch.setattr(app_module, "_probe_all", fake_probe)
+
+    real_insert = store.insert_sample
+    calls = {"n": 0}
+
+    def flaky_insert(conn, sample):
+        calls["n"] += 1
+        if calls["n"] == 3:  # fail partway through the node loop
+            raise RuntimeError("insert blew up")
+        return real_insert(conn, sample)
+
+    monkeypatch.setattr(store, "insert_sample", flaky_insert)
+
+    with pytest.raises(RuntimeError):
+        await app_module.run_tick()
+
+    # The whole transaction rolled back: no samples, last_tick_ts not advanced.
+    assert store.get_meta(app_module.conn, "last_tick_ts") == "0"
+    assert app_module.conn.execute("SELECT COUNT(*) AS c FROM samples").fetchone()["c"] == 0
