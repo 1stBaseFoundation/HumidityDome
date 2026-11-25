@@ -146,6 +146,10 @@ and the daily LLM context stays well under free-tier token limits.
 
 *Instant alert when a node goes unreachable — one email per incident, no duplicates.*
 
+![HumidityDome resolved alert email](docs/screenshot-resolved-alert.png)
+
+*Recovery notice when a node comes back — the same incident thread, closed automatically.*
+
 ## Tech stack
 
 - **Fly.io Sprites** — persistent, hardware-isolated VM; sleeps when idle, wakes on request
