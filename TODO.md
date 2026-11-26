@@ -1,7 +1,7 @@
 # HumidityDome — Build To-Do
 
 > Infrastructure heartbeat for the 1stBase blockchain. Polls the 6 nodes (5 seeds +
-> preview node) every 30 minutes, validates sync / peer / version state, emails a daily
+> preview node) every hour, validates sync / peer / version state, emails a daily
 > summary at **09:00 UTC+2**, and sends instant alerts when a node faults. Runs on a
 > Fly.io Sprite that sleeps between ticks.
 
@@ -102,7 +102,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] Groq connector
 - [x] Resend connector
 - [x] Resend DNS verified
-- [x] GitHub Actions `tick.yml` — cron `*/30 * * * *`
+- [x] GitHub Actions `tick.yml` — cron `0 * * * *` (hourly)
 - [x] `SPRITE_URL`, `SPRITES_TOKEN` secrets
 - [x] Manual `workflow_dispatch` test (green)
 

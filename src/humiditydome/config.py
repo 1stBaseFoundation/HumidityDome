@@ -21,7 +21,7 @@ def _build[T](cls: type[T], data: dict[str, Any] | None) -> T:
 
 @dataclass
 class PollConfig:
-    interval_minutes: int = 30
+    interval_minutes: int = 60
     timeout_seconds: float = 10.0
     user_agent: str = "HumidityDome/1.0"
 

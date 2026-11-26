@@ -2,9 +2,11 @@ name: tick
 
 on:
   schedule:
-    # Every 30 minutes, UTC. GitHub may delay scheduled runs by a few minutes.
+    # Every hour, UTC. GitHub may delay scheduled runs by a few minutes, and on
+    # low-activity repos it can drop scheduled runs entirely — a 1-hour external
+    # cron (cron-job.org) is the reliable primary trigger.
     # Editing this file forces GitHub to re-register the schedule if it stops firing.
-    - cron: "*/30 * * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 jobs:

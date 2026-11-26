@@ -1,6 +1,6 @@
 # HumidityDome configuration
 poll:
-  interval_minutes: 30
+  interval_minutes: 60
   timeout_seconds: 10
   user_agent: "HumidityDome/1.0"
 

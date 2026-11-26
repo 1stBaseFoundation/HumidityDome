@@ -1,7 +1,7 @@
 """FastAPI app for HumidityDome.
 
 The Sprite proxy routes its URL to this service and wakes it on each request.
-The GitHub Actions cron posts to /tick every 30 minutes.
+The GitHub Actions cron posts to /tick every hour.
 """
 from __future__ import annotations
 

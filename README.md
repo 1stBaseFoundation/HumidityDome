@@ -25,7 +25,7 @@ performance and tend to your seeds before they sprout poor branches on the netwo
 ## How it works
 
 ```
-            every 30 min (cron-job.org or any HTTP scheduler)
+            every hour (cron-job.org or any HTTP scheduler)
                           |
                           v
               +---------------------+
@@ -53,7 +53,7 @@ performance and tend to your seeds before they sprout poor branches on the netwo
 - The LLM only writes prose; **all numbers are computed in code** — that is what keeps the
   summary "error-free".
 - **7-day retention:** samples, incidents, and reports older than 7 days are deleted on
-  every tick (`paths.retention_days`). At 30-min polling and 6 nodes that's ~2,000 sample
+  every tick (`paths.retention_days`). At hourly polling and 6 nodes that's ~1,000 sample
   rows — the SQLite file stays tiny and the LLM context stays well under free-tier limits.
 
 ## Why Fly.io Sprites
@@ -65,7 +65,7 @@ database:
   ext4 filesystem. SQLite, installed packages, and files survive warm and cold pauses — no
   external database or volume plumbing.
 - **Idle-aware by default.** The Sprite sleeps when nothing is happening and wakes on the
-  next request (100–500 ms warm, 1–2 s cold). A 30-minute poll means the VM is asleep for
+  next request (100–500 ms warm, 1–2 s cold). An hourly poll means the VM is asleep for
   the vast majority of the day.
 - **Wake-on-request.** Every Sprite gets an HTTPS URL. An inbound request wakes it, so an
   external cron can drive the agent without an always-on process.
@@ -133,7 +133,7 @@ day.
 
 HumidityDome keeps a rolling **7-day** window. On every tick, `prune_old_data()` deletes
 `samples`, `incidents`, and `daily_reports` older than `paths.retention_days` (default 7).
-At 30-minute polling and 6 nodes that is ~2,000 sample rows — the SQLite file stays small
+At hourly polling and 6 nodes that is ~1,000 sample rows — the SQLite file stays small
 and the daily LLM context stays well under free-tier token limits.
 
 ## Screenshot
@@ -229,7 +229,7 @@ that can `POST <sprite-url>/tick` with `Authorization: Bearer <SPRITES_TOKEN>` w
 
 1. Create a cronjob at **https://cron-job.org**.
 2. **URL:** `https://<sprite-name>-<org-id>.sprites.app/tick`
-3. **Schedule:** every 30 minutes (or hourly for fewer runs).
+3. **Schedule:** every hour.
 4. **Method:** `POST`
 5. **Header:** `Authorization: Bearer <SPRITES_TOKEN>`
 6. **Body:** `{}`
@@ -272,7 +272,8 @@ Almost always this means a `FlyV1…` Fly.io organization token was used instead
 a **Sprites → Tokens** token. Recreate the token in the Sprites dashboard and
 update the secret.
 
-The workflow posts to `/tick` every 30 minutes.
+The workflow posts to `/tick` every hour (GitHub's cron can be delayed or dropped on
+low-activity repos, so an external 1-hour cron-job.org trigger is the reliable primary).
 
 ## Local development
 
@@ -286,14 +287,14 @@ Set `HUMIDITYDOME_DRYRUN=1` to skip real emails while developing.
 
 ## Cost & scaling
 
-At the current 6-node / 48-poll-per-day scale, this fits comfortably within free tiers:
+At the current 6-node / 24-poll-per-day scale, this fits comfortably within free tiers:
 
 | Component | Usage | Free tier |
 |---|---|---|
 | **Sprites** | a few seconds of compute per tick; asleep the rest of the time | idle-free |
 | **Groq** | 1–2 calls/day, ~400-token prompts | free developer plan |
 | **Resend** | ~30–60 emails/month | 3,000/month |
-| **cron-job.org / GitHub Actions** | 48 runs/day | free |
+| **cron-job.org / GitHub Actions** | 24 runs/day | free |
 
 The design is usage-based: the Sprite is only active for the few seconds it takes to probe
 the nodes and persist a tick. **At current scale the target is $0/month.**
