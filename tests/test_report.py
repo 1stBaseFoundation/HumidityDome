@@ -109,3 +109,24 @@ async def test_build_and_send_report_marks_sent(tmp_path) -> None:
 
     assert result["date"] == "2026-11-23"
     assert store.was_report_sent(conn, "2026-11-23") is True
+
+
+async def test_build_and_send_report_falls_back_on_llm_error(tmp_path, monkeypatch) -> None:
+    conn = store.connect(str(tmp_path / "test.db"))
+    cfg = make_cfg(dry_run=False)
+    ts = datetime(2026, 11, 23, 5, 0, tzinfo=UTC).timestamp()
+
+    async def boom(rollup, cfg):
+        raise report.llm.LLMError("model off-schema")
+
+    async def no_send(to, subject, html_body, cfg):
+        return None
+
+    monkeypatch.setattr(report.llm, "summarize", boom)
+    monkeypatch.setattr(report.mail, "send_email", no_send)
+
+    result = await report.build_and_send_report(conn, cfg, now=ts)
+
+    # The report still goes out, with the deterministic fallback summary.
+    assert "fallback" in result["summary"].lower()
+    assert store.was_report_sent(conn, "2026-11-23") is True

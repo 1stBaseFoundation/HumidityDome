@@ -133,7 +133,10 @@ async def build_and_send_report(
     since = now - 24 * 3600
 
     rollup = store.build_rollup(conn, since, now, cfg.nodes)
-    summary = await llm.summarize(rollup, cfg)
+    try:
+        summary = await llm.summarize(rollup, cfg)
+    except llm.LLMError:
+        summary = llm.fallback_summary(rollup)
     body = render_html(rollup, summary, cfg.llm.model)
 
     date = local_date(cfg, now)
