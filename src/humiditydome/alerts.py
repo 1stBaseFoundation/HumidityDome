@@ -26,6 +26,16 @@ def _min_peers(sample: Sample, cfg: AlertConfig) -> int:
     return sample.min_peers if sample.min_peers is not None else 1
 
 
+def _baseline(version: str | None) -> str | None:
+    """Strip the trailing '*' anchor used to mark an already-reported version.
+
+    ``first_seen_version`` stores the last version we alerted on, with a '*'
+    suffix once that version has been surfaced. Comparing/displaying must use the
+    bare version, so the anchor is removed everywhere except the stored value.
+    """
+    return version.rstrip("*") if version else version
+
+
 def _worst(alerts: list[Alert]) -> Alert:
     return max(alerts, key=lambda a: _SEVERITY_RANK.get(a.severity, 0))
 
@@ -125,13 +135,13 @@ def evaluate(sample: Sample, state: NodeState, cfg: AlertConfig) -> list[Alert]:
             )
         )
 
-    if sample.version and state.first_seen_version and sample.version != state.first_seen_version:
+    if sample.version and state.first_seen_version and sample.version != _baseline(state.first_seen_version):
         alerts.append(
             Alert(
                 node=sample.node,
                 kind="version_change",
                 severity="info",
-                title=f"{sample.node} version {state.first_seen_version} -> {sample.version}",
+                title=f"{sample.node} version {_baseline(state.first_seen_version)} -> {sample.version}",
                 detail="node version changed since first seen",
             )
         )
@@ -191,6 +201,9 @@ def process_sample(
             return []
 
         # No incident: surface info-level alerts (e.g. version change).
+        # Anchor the baseline so a reported version change fires once, not hourly.
+        if any(alert.kind == "version_change" for alert in alerts):
+            state.first_seen_version = f"{sample.version}*"
         store.upsert_node_state(conn, state)
         if alerts:
             return [alert for alert in alerts if alert.severity == "info"]

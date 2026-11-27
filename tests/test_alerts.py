@@ -174,6 +174,30 @@ def test_version_change_is_info(tmp_path) -> None:
     assert [alert.kind for alert in found] == ["version_change"]
 
 
+def test_version_change_fires_once(tmp_path) -> None:
+    conn = store.connect(str(tmp_path / "test.db"))
+    cfg = AlertConfig(consecutive_failures=1)
+    state = NodeState(node="seed-test", first_seen_version="1.4.7")
+
+    first = alerts.process_sample(conn, make_sample(version="1.4.9"), state, cfg)
+    assert [alert.kind for alert in first] == ["version_change"]
+    assert "1.4.7 -> 1.4.9" in first[0].title
+    assert "*" not in first[0].title  # anchor never leaks into the message
+
+    # The baseline is now anchored at the reported version: no repeat next tick.
+    second = alerts.process_sample(
+        conn, make_sample(version="1.4.9"), store.get_node_state(conn, "seed-test"), cfg
+    )
+    assert second == []
+
+    # A genuinely new version still alerts.
+    third = alerts.process_sample(
+        conn, make_sample(version="1.5.0"), store.get_node_state(conn, "seed-test"), cfg
+    )
+    assert [alert.kind for alert in third] == ["version_change"]
+    assert "1.4.9 -> 1.5.0" in third[0].title
+
+
 def test_recovery_disabled(tmp_path) -> None:
     conn = store.connect(str(tmp_path / "test.db"))
     cfg = AlertConfig(consecutive_failures=1, send_recovery=False)
