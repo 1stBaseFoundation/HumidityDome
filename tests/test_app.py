@@ -194,6 +194,37 @@ def test_tick_skips_missing_node(client: TestClient, monkeypatch) -> None:
     assert "seed-84" not in body["nodes"]
 
 
+def test_tick_pings_watchdog(client: TestClient, monkeypatch) -> None:
+    pings: list[str] = []
+
+    async def fake_ping(url: str, *, ok: bool = True, timeout: float = 10.0) -> bool:
+        pings.append(url)
+        return True
+
+    monkeypatch.setattr(app_module, "heartbeat", SimpleNamespace(ping=fake_ping))
+    monkeypatch.setattr(app_module.cfg, "heartbeat_url", "https://hc.example/uuid")
+    reset_tick()
+
+    body = client.post("/tick").json()
+
+    assert pings == ["https://hc.example/uuid"]
+    assert body["heartbeat"] is True
+
+
+def test_tick_survives_watchdog_outage(client: TestClient, monkeypatch) -> None:
+    async def dead_ping(url: str, *, ok: bool = True, timeout: float = 10.0) -> bool:
+        return False
+
+    monkeypatch.setattr(app_module, "heartbeat", SimpleNamespace(ping=dead_ping))
+    monkeypatch.setattr(app_module.cfg, "heartbeat_url", "https://hc.example/uuid")
+    reset_tick()
+
+    response = client.post("/tick")
+
+    assert response.status_code == 200
+    assert response.json()["heartbeat"] is False
+
+
 def test_tick_sends_report_when_due(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(app_module.report, "is_report_time", lambda cfg, now=None: True)
     reset_tick()

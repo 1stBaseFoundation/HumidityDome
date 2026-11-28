@@ -2,24 +2,45 @@ name: tick
 
 on:
   schedule:
-    # Every hour, UTC. GitHub may delay scheduled runs by a few minutes, and on
-    # low-activity repos it can drop scheduled runs entirely — a 1-hour external
-    # cron (cron-job.org) is the reliable primary trigger.
+    # Every hour, UTC. GitHub scheduled runs are best-effort: it can delay them
+    # by minutes and, during busy periods, drop them entirely. The step below
+    # retries through a cold Sprite wake instead of trusting one attempt.
     # Editing this file forces GitHub to re-register the schedule if it stops firing.
     - cron: "0 * * * *"
   workflow_dispatch:
+
+# Never let two ticks overlap; the app is single-flight, but queuing here keeps
+# the logs readable and avoids pointless cold-start contention.
+concurrency:
+  group: tick
+  cancel-in-progress: false
 
 jobs:
   tick:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger HumidityDome tick
+      - name: Wake the Sprite and run a tick
         run: |
-          curl -sS -X POST "$SPRITE_URL/tick" \
-            -H "Authorization: Bearer $SPRITES_TOKEN" \
-            -H "Content-Type: application/json" \
-            --retry 2 --retry-delay 5 --retry-all-errors --max-time 90 \
-            --fail-with-body
+          # A cold wake can take 10-30s and the proxy may 502 while the service
+          # starts, so retry for up to ~5 minutes before giving up. A 200 also
+          # covers "tick too soon" / "run in progress": the tick is idempotent.
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS -o "$RUNNER_TEMP/tick.json" -w '%{http_code}' \
+              -X POST "$SPRITE_URL/tick" \
+              -H "Authorization: Bearer $SPRITES_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{}' \
+              --connect-timeout 15 --max-time 120 || true)
+            echo "attempt $attempt -> HTTP ${code:-<no response>}"
+            cat "$RUNNER_TEMP/tick.json" 2>/dev/null || true
+            echo
+            if [ "$code" = "200" ]; then
+              exit 0
+            fi
+            sleep 25
+          done
+          echo "::error::tick did not succeed after 12 attempts"
+          exit 1
         env:
           SPRITE_URL: ${{ secrets.SPRITE_URL }}
           SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}

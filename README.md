@@ -202,43 +202,82 @@ and the daily LLM context stays well under free-tier token limits.
    not the mailbox.
 
 ### 4. Deploy the Sprite
+
+> **There is no auto-deploy.** The Sprite runs whatever source was last copied into
+> `/home/sprite/humiditydome` — pushing to GitHub does not change it. A merged fix
+> keeps "still happening" until you copy the files and restart the service.
+
 ```bash
 sprite create humiditydome
 sprite use humiditydome
 
+# first deploy: clone and install into the Sprite's own venv
 sprite exec -- bash -c "git clone https://github.com/1stBaseFoundation/HumidityDome /home/sprite/humiditydome && \
-  pip install -r /home/sprite/humiditydome/requirements.txt"
+  python3 -m venv /home/sprite/humiditydome/.venv && \
+  /home/sprite/humiditydome/.venv/bin/pip install -r /home/sprite/humiditydome/requirements.txt"
 
 sprite-env services create web \
-  --cmd uvicorn \
+  --cmd /home/sprite/humiditydome/.venv/bin/uvicorn \
   --args "humiditydome.app:app,--host,0.0.0.0,--port,8080" \
   --dir /home/sprite/humiditydome/src \
   --http-port 8080
 ```
 
-Because the Sprite has a persistent ext4 disk, the SQLite database at
-`/home/sprite/humiditydome/humiditydome.db` survives every sleep — there is no external
-database to provision.
+Redeploy after every change:
+
+```bash
+# 1. copy the new tree in (works even if the Sprite's copy is not a git checkout)
+sprite exec -- bash -c "cd /tmp && rm -rf hd-src && mkdir hd-src && \
+  curl -fsSL https://github.com/1stBaseFoundation/HumidityDome/archive/main.tar.gz | \
+  tar xz -C hd-src --strip-components=1 && \
+  cp -a hd-src/src hd-src/config /home/sprite/humiditydome/"
+
+# 2. restart so uvicorn loads the new code
+sprite exec -- sprite-env services restart web
+
+# 3. verify the running code is the new code
+sprite exec -- grep -n "heartbeat" /home/sprite/humiditydome/src/humiditydome/app.py
+```
+
+The database at `/home/sprite/humiditydome/humiditydome.db` is never touched by a
+deploy — it lives on the Sprite's persistent ext4 disk and survives every sleep, so
+there is no external database to provision.
 
 ### 5. Scheduling (the trigger)
 
 The Sprite sleeps when idle, so it needs an external HTTP request to wake it. Any scheduler
 that can `POST <sprite-url>/tick` with `Authorization: Bearer <SPRITES_TOKEN>` works.
 
-#### Option A — cron-job.org (recommended, free)
+A cold wake is the weak point: the Sprite proxy can answer `502` for 10–30s while the
+service starts, so a scheduler with a short timeout will report failures **even though the
+app is fine** (the DB shows every delivered request returns 200). Pick a scheduler that
+can retry — and add the [watchdog](#6-watchdog-detect-missed-ticks) so a missed run is
+reported rather than assumed.
 
-1. Create a cronjob at **https://cron-job.org**.
-2. **URL:** `https://<sprite-name>-<org-id>.sprites.app/tick`
-3. **Schedule:** every hour.
-4. **Method:** `POST`
-5. **Header:** `Authorization: Bearer <SPRITES_TOKEN>`
-6. **Body:** `{}`
-7. Save → **Run now** to test.
+#### Option A — Cloudflare Workers cron (recommended, free)
 
-This is the most reliable option. GitHub's scheduler can be slow to register for new
-repositories; cron-job.org is purpose-built for this.
+The free Workers plan includes cron triggers (`5` per account), 15 minutes of wall time per
+invocation, and no per-run charge at this scale — so the Worker itself can retry the wake
+instead of failing on the first `502`. The Worker lives in [`workers/tick.js`](workers/tick.js):
+
+```bash
+cd workers
+npx wrangler secret put SPRITE_URL      # https://<sprite-name>-<org-id>.sprites.app
+npx wrangler secret put SPRITES_TOKEN   # a Sprites → Tokens token
+npx wrangler deploy                     # crons: ["0 * * * *"]
+```
+
+`SPRITE_URL` is the base URL without `/tick`.
 
 #### Option B — GitHub Actions
+
+For a **public** repository Actions minutes are unlimited, so the hourly schedule costs
+nothing. The catch is reliability, not quota: GitHub runs scheduled workflows best-effort —
+it delays them under load and sometimes drops them, especially on low-activity repos. The
+workflow in `.github/workflows/tick.yml` therefore retries the wake for ~5 minutes instead
+of trusting a single request.
+
+Add two repository secrets (**Settings → Secrets and variables → Actions**):
 
 Add two repository secrets (**Settings → Secrets and variables → Actions**):
 
@@ -272,8 +311,45 @@ Almost always this means a `FlyV1…` Fly.io organization token was used instead
 a **Sprites → Tokens** token. Recreate the token in the Sprites dashboard and
 update the secret.
 
-The workflow posts to `/tick` every hour (GitHub's cron can be delayed or dropped on
-low-activity repos, so an external 1-hour cron-job.org trigger is the reliable primary).
+#### Option C — cron-job.org (best-effort backup)
+
+1. Create a cronjob at **https://cron-job.org**.
+2. **URL:** `https://<sprite-name>-<org-id>.sprites.app/tick`
+3. **Schedule:** every hour.
+4. **Method:** `POST`
+5. **Header:** `Authorization: Bearer <SPRITES_TOKEN>`
+6. **Body:** `{}`
+7. Save → **Run now** to test.
+
+Its 30-second timeout is shorter than a cold report tick (wake + probes + LLM + email), so it
+will report failures on runs that actually succeeded. Use it as a *second* trigger, never as
+the only one.
+
+#### Running two schedulers is safe
+
+`/tick` is idempotent: a request within half the poll interval returns `{"skipped": true,
+"reason": "tick too soon"}`, and concurrent requests return `"run in progress"`. Point two
+schedulers at different minutes and a missed run by one is covered by the other.
+
+### 6. Watchdog (detect missed ticks)
+
+The Sprite cannot report its own silence: if it never wakes, no code runs to tell you. A
+dead-man's switch closes that gap — the app pings an external watchdog after every completed
+tick, and the watchdog emails you when the pings stop.
+
+1. Create a check at **https://healthchecks.io** (free plan: 20 checks).
+2. **Period:** 1 hour, **Grace:** 30 minutes.
+3. Add the ping URL to `config/nodes.yaml` (or set `HUMIDITYDOME_HEARTBEAT_URL` on the Sprite):
+
+   ```yaml
+   paths:
+     heartbeat_url: "https://hc-ping.com/<uuid>"
+   ```
+
+4. Redeploy and restart (§4), then confirm a tick reports `"heartbeat": true`.
+
+The ping URL is not a credential — it only records that a tick finished, so it is safe to
+keep in config. A failed ping never fails the tick.
 
 ## Local development
 
@@ -294,7 +370,10 @@ At the current 6-node / 24-poll-per-day scale, this fits comfortably within free
 | **Sprites** | a few seconds of compute per tick; asleep the rest of the time | idle-free |
 | **Groq** | 1–2 calls/day, ~400-token prompts | free developer plan |
 | **Resend** | ~30–60 emails/month | 3,000/month |
-| **cron-job.org / GitHub Actions** | 24 runs/day | free |
+| **Cloudflare Workers cron** | 24 invocations/day (≈72 requests with retries) | 100,000 requests/day |
+| **GitHub Actions** | 24 runs/day — public repo, so minutes are unmetered | unlimited (public) |
+| **cron-job.org** | 24 runs/day | free |
+| **healthchecks.io** | 1 check, 24 pings/day | 20 checks |
 
 The design is usage-based: the Sprite is only active for the few seconds it takes to probe
 the nodes and persist a tick. **At current scale the target is $0/month.**
@@ -311,6 +390,9 @@ volume.
   and must be a **Sprites → Tokens** token (`org-slug/…`), not a Fly.io organization token
   (`FlyV1…`).
 - The Sprite URL is private by default (org-only, token-authenticated).
+- The watchdog ping URL is **not** a credential — it only records that a tick finished, so it
+  lives in `config/nodes.yaml`. Scheduler tokens live in Cloudflare/GitHub secrets, never in
+  the repo.
 - Connector access is deny-by-default: only the `humiditydome` Sprite can use the Groq and
   Resend connectors.
 

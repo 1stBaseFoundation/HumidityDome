@@ -76,6 +76,8 @@ class Config:
     database: str = "humiditydome.db"
     retention_days: int = 7
     dry_run: bool = False
+    # Optional watchdog URL pinged after each completed tick (Healthchecks.io).
+    heartbeat_url: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -94,6 +96,9 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
     retention_days = int(raw.get("paths", {}).get("retention_days", 7))
     dry_run = os.environ.get("HUMIDITYDOME_DRYRUN", "").lower() in {"1", "true", "yes"}
     dry_run = dry_run or bool(raw.get("paths", {}).get("dry_run", False))
+    heartbeat_url = os.environ.get("HUMIDITYDOME_HEARTBEAT_URL") or str(
+        raw.get("paths", {}).get("heartbeat_url", "")
+    )
 
     nodes: list[NodeConfig] = []
     for item in raw.get("nodes", []) or []:
@@ -128,5 +133,6 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
         database=database,
         retention_days=retention_days,
         dry_run=dry_run,
+        heartbeat_url=heartbeat_url,
         raw=raw,
     )

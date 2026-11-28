@@ -1,7 +1,8 @@
 """FastAPI app for HumidityDome.
 
 The Sprite proxy routes its URL to this service and wakes it on each request.
-The GitHub Actions cron posts to /tick every hour.
+An external scheduler (Cloudflare cron, GitHub Actions or cron-job.org) posts to
+/tick every hour, and a completed tick pings an optional watchdog.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 
-from . import alerts, mail, report, store
+from . import alerts, heartbeat, mail, report, store
 from .config import load_config
 from .logging_setup import configure_logging, get_logger, kv
 from .models import Alert, Sample
@@ -186,6 +187,10 @@ async def _run_tick_locked(now: float | None = None) -> dict[str, Any]:
             await report.build_and_send_report(conn, cfg, now)
             report_sent = True
 
+    # The dead-man's switch: the Sprite cannot report its own silence, so the
+    # watchdog is pinged only after the tick has fully completed.
+    heartbeat_ok = await heartbeat.ping(cfg.heartbeat_url)
+
     logger.info(
         "tick %s",
         kv(
@@ -195,12 +200,14 @@ async def _run_tick_locked(now: float | None = None) -> dict[str, Any]:
             nodes=len(per_node),
             alerts=len(out_alerts),
             report_sent=report_sent,
+            heartbeat=heartbeat_ok,
         ),
     )
     return {
         "ok": True,
         "tick_ts": now,
         "dry_run": cfg.dry_run,
+        "heartbeat": heartbeat_ok,
         "nodes": {
             name: {
                 "ok": sample.ok,

@@ -36,6 +36,8 @@ paths:
   database: "/home/sprite/humiditydome/humiditydome.db"
   dry_run: false
   retention_days: 7
+  # Dead-man's switch: pinged after every completed tick (see README §6).
+  # heartbeat_url: "https://hc-ping.com/<uuid>"
 
 nodes:
   - name: seed-150
