@@ -1,7 +1,0 @@
-name = "humiditydome-tick"
-main = "tick.js"
-compatibility_date = "2026-11-01"
-
-# Hourly, UTC — matches the app's poll.interval_minutes: 60.
-[triggers]
-crons = ["0 * * * *"]

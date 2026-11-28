@@ -245,46 +245,30 @@ there is no external database to provision.
 
 ### 5. Scheduling (the trigger)
 
-The Sprite sleeps when idle, so it needs an external HTTP request to wake it. Any scheduler
-that can `POST <sprite-url>/tick` with `Authorization: Bearer <SPRITES_TOKEN>` works.
+The Sprite sleeps when idle, so it needs an external HTTP request to wake it. **One trigger
+is enough** — this deployment uses a single hourly cron-job.org job. A second scheduler is
+not more reliable, it just doubles the cold-wake attempts and the noise.
 
-A cold wake is the weak point: the Sprite proxy can answer `502` for 10–30s while the
-service starts, so a scheduler with a short timeout will report failures **even though the
-app is fine** (the DB shows every delivered request returns 200). Pick a scheduler that
-can retry — and add the [watchdog](#6-watchdog-detect-missed-ticks) so a missed run is
-reported rather than assumed.
+1. Create a cronjob at **https://cron-job.org**.
+2. **URL:** `https://<sprite-name>-<org-id>.sprites.app/tick`
+3. **Schedule:** every hour.
+4. **Method:** `POST`
+5. **Header:** `Authorization: Bearer <SPRITES_TOKEN>`
+6. **Body:** `{}`
+7. Save → **Run now** to test.
 
-#### Option A — Cloudflare Workers cron (recommended, free)
+A cron-job.org request completes in a few seconds: it fires at `:00`, the Sprite wakes in
+1–2s, and the app answers in ~1s — far inside the free 30-second timeout. The daily report
+tick (wake + probes + LLM + email) can run longer than 30s, so cron-job.org may log a
+timeout on that one run even though the email still sends server-side; that is cosmetic.
 
-The free Workers plan includes cron triggers (`5` per account), 15 minutes of wall time per
-invocation, and no per-run charge at this scale — so the Worker itself can retry the wake
-instead of failing on the first `502`. The Worker lives in [`workers/tick.js`](workers/tick.js):
+Free cron-job.org is capped at 100 requests/day (24 here) and can occasionally drop a run.
+When that happens the [watchdog](#6-watchdog-detect-missed-ticks) tells you, and you can
+`Run now` by hand. If a single trigger proves too flaky in practice, the minimal escalation
+is a **second cron-job.org entry at a different minute** — still one service, no new
+infrastructure — not another scheduler platform.
 
-```bash
-cd workers
-npx wrangler secret put SPRITE_URL      # https://<sprite-name>-<org-id>.sprites.app
-npx wrangler secret put SPRITES_TOKEN   # a Sprites → Tokens token
-npx wrangler deploy                     # crons: ["0 * * * *"]
-```
-
-`SPRITE_URL` is the base URL without `/tick`.
-
-#### Option B — GitHub Actions
-
-For a **public** repository Actions minutes are unlimited, so the hourly schedule costs
-nothing. The catch is reliability, not quota: GitHub runs scheduled workflows best-effort —
-it delays them under load and sometimes drops them, especially on low-activity repos. The
-workflow in `.github/workflows/tick.yml` therefore retries the wake for ~5 minutes instead
-of trusting a single request.
-
-Add two repository secrets (**Settings → Secrets and variables → Actions**):
-
-Add two repository secrets (**Settings → Secrets and variables → Actions**):
-
-- `SPRITE_URL` — the Sprite's URL from `sprite info`, e.g. `https://<sprite-name>-<org-id>.sprites.app`
-- `SPRITES_TOKEN` — a **Sprites token**, *not* a Fly.io organization token
-
-##### Which token goes in `SPRITES_TOKEN`?
+#### Which token goes in `SPRITES_TOKEN`?
 
 This is the easiest step to get wrong. Fly.io has two different token screens:
 
@@ -297,39 +281,15 @@ Create the token under **Sprites → Tokens**, with the correct organization sel
 (the org that owns the Sprite — `1stbase` in this deployment). Sign in as the
 account that owns that org, then copy the **entire** token string.
 
-##### Troubleshooting `401 unauthorized`
+A `401 {"error":"unauthorized"}` almost always means a `FlyV1…` Fly.io organization token
+was used instead of a **Sprites → Tokens** token. Recreate it in the Sprites dashboard.
 
-If the workflow fails with:
+#### Manual trigger (GitHub Actions)
 
-```
-curl: (22) The requested URL returned error: 401
-{"error":"unauthorized"}
-```
-
-the `SPRITE_URL` is reachable but `SPRITES_TOKEN` is not a valid Sprites token.
-Almost always this means a `FlyV1…` Fly.io organization token was used instead of
-a **Sprites → Tokens** token. Recreate the token in the Sprites dashboard and
-update the secret.
-
-#### Option C — cron-job.org (best-effort backup)
-
-1. Create a cronjob at **https://cron-job.org**.
-2. **URL:** `https://<sprite-name>-<org-id>.sprites.app/tick`
-3. **Schedule:** every hour.
-4. **Method:** `POST`
-5. **Header:** `Authorization: Bearer <SPRITES_TOKEN>`
-6. **Body:** `{}`
-7. Save → **Run now** to test.
-
-Its 30-second timeout is shorter than a cold report tick (wake + probes + LLM + email), so it
-will report failures on runs that actually succeeded. Use it as a *second* trigger, never as
-the only one.
-
-#### Running two schedulers is safe
-
-`/tick` is idempotent: a request within half the poll interval returns `{"skipped": true,
-"reason": "tick too soon"}`, and concurrent requests return `"run in progress"`. Point two
-schedulers at different minutes and a missed run by one is covered by the other.
+`.github/workflows/tick.yml` has no schedule — it exists only so you can fire a tick by
+hand from the **Actions** tab (`Run workflow`). It needs the same two repository secrets
+(`SPRITE_URL`, `SPRITES_TOKEN`) and retries the wake for ~5 minutes, which is handy when
+you want to force a run outside the cron.
 
 ### 6. Watchdog (detect missed ticks)
 
@@ -370,9 +330,8 @@ At the current 6-node / 24-poll-per-day scale, this fits comfortably within free
 | **Sprites** | a few seconds of compute per tick; asleep the rest of the time | idle-free |
 | **Groq** | 1–2 calls/day, ~400-token prompts | free developer plan |
 | **Resend** | ~30–60 emails/month | 3,000/month |
-| **Cloudflare Workers cron** | 24 invocations/day (≈72 requests with retries) | 100,000 requests/day |
-| **GitHub Actions** | 24 runs/day — public repo, so minutes are unmetered | unlimited (public) |
-| **cron-job.org** | 24 runs/day | free |
+| **cron-job.org** | 24 runs/day | 100 requests/day (free) |
+| **GitHub Actions** | manual runs only — public repo, so minutes are unmetered | unlimited (public) |
 | **healthchecks.io** | 1 check, 24 pings/day | 20 checks |
 
 The design is usage-based: the Sprite is only active for the few seconds it takes to probe
@@ -391,8 +350,8 @@ volume.
   (`FlyV1…`).
 - The Sprite URL is private by default (org-only, token-authenticated).
 - The watchdog ping URL is **not** a credential — it only records that a tick finished, so it
-  lives in `config/nodes.yaml`. Scheduler tokens live in Cloudflare/GitHub secrets, never in
-  the repo.
+  lives in `config/nodes.yaml`. The scheduler token lives in the cron-job.org request header
+  (or GitHub Actions secrets for manual runs), never in the repo.
 - Connector access is deny-by-default: only the `humiditydome` Sprite can use the Groq and
   Resend connectors.
 

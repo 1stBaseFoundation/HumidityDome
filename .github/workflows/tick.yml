@@ -1,16 +1,12 @@
 name: tick
 
+# Manual trigger only. The hourly schedule lives in cron-job.org (see README §5);
+# a second scheduled trigger here would just double the cold-wake attempts.
+# This workflow exists so a tick can be forced by hand from the Actions tab.
 on:
-  schedule:
-    # Every hour, UTC. GitHub scheduled runs are best-effort: it can delay them
-    # by minutes and, during busy periods, drop them entirely. The step below
-    # retries through a cold Sprite wake instead of trusting one attempt.
-    # Editing this file forces GitHub to re-register the schedule if it stops firing.
-    - cron: "0 * * * *"
   workflow_dispatch:
 
-# Never let two ticks overlap; the app is single-flight, but queuing here keeps
-# the logs readable and avoids pointless cold-start contention.
+# Never let two manual runs overlap; the app is single-flight anyway.
 concurrency:
   group: tick
   cancel-in-progress: false

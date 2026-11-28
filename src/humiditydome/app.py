@@ -1,8 +1,8 @@
 """FastAPI app for HumidityDome.
 
 The Sprite proxy routes its URL to this service and wakes it on each request.
-An external scheduler (Cloudflare cron, GitHub Actions or cron-job.org) posts to
-/tick every hour, and a completed tick pings an optional watchdog.
+An external scheduler (cron-job.org) posts to /tick every hour, and a completed
+tick pings an optional watchdog.
 """
 from __future__ import annotations
 
