@@ -37,7 +37,7 @@ paths:
   dry_run: false
   retention_days: 7
   # Dead-man's switch: pinged after every completed tick (see README §6).
-  # heartbeat_url: "https://hc-ping.com/<uuid>"
+  heartbeat_url: "https://hc-ping.com/6d585979-c686-4221-8309-2b621f3bdb09"
 
 nodes:
   - name: seed-150
